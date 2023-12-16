@@ -5,7 +5,7 @@ TARGET = main
 
 all: $(TARGET)
 
-$(TARGET): main.c log.c
+$(TARGET): main.c log.c msr.c
 	$(CC) $(CFLAGS) -o $(TARGET) main.c log.c
 
 clean:

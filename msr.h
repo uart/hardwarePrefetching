@@ -13,6 +13,48 @@
 #define MSR_FIXED_CTR1 0x30A // CPU_CLK_UNHALTED.CORE
 #define IA32_FIXED_CTR_CTRL 0x38D
 
+// Default prefetcher settings. The settings below are for the 12th generation Intel Alderlake chip 
+
+// Default msr1320 settings
+#define L2_STREAM_AMP_XQ_THRESHOLD_1320 4
+#define L2_STREAM_MAX_DISTANCE_1320 16
+#define L2_AMP_DISABLE_RECURSION_1320 1
+#define LLC_STREAM_MAX_DISTANCE_1320 63
+#define LLC_STREAM_DISABLE_1320 0
+#define LLC_STREAM_XQ_THRESHOLD_1320 4
+
+// Default msr1321 settings
+#define L2_STREAM_AMP_CREATE_IL1_1321 1
+#define L2_STREAM_DEMAND_DENSITY_1321 16
+#define L2_STREAM_DEMAND_DENSITY_OVR_1321 9
+#define L2_DISABLE_NEXT_LINE_PREFETCH_1321 1
+#define L2_LLC_STREAM_AMP_XQ_THRESHOLD_1321 18
+
+// Default msr1322 settings
+#define LLC_STREAM_DEMAND_DENSITY_1322 320
+#define LLC_STREAM_DEMAND_DENSITY_OVR_1322 9
+#define L2_AMP_CONFIDENCE_DPT0_1322 1
+#define L2_AMP_CONFIDENCE_DPT1_1322 3
+#define L2_AMP_CONFIDENCE_DPT2_1322 5
+#define L2_AMP_CONFIDENCE_DPT3_1322 7
+#define L2_LLC_STREAM_DEMAND_DENSITY_XQ_1322 5
+
+// Default msr1323 settings
+#define L2_STREAM_AMP_CREATE_SWPFRFO_1323 1
+#define L2_STREAM_AMP_CREATE_SWPFRD_1323 1
+#define L2_STREAM_AMP_CREATE_HWPFD_1323 0
+#define L2_STREAM_AMP_CREATE_DRFO_1323 1
+#define STABILIZE_PREF_ON_SWPFRFO_1323 1
+#define STABILIZE_PREF_ON_SWPFRD_1323 1
+#define STABILIZE_PREF_ON_IL1_1323 0
+#define STABILIZE_PREF_ON_HWPFD_1323 1
+#define STABILIZE_PREF_ON_DRFO_1323 1
+#define L2_STREAM_AMP_CREATE_PFNPP_1323 1
+#define L2_STREAM_AMP_CREATE_PFIPP_1323 1
+#define STABILIZE_PREF_ON_PFNPP_1323 1
+#define STABILIZE_PREF_ON_PFIPP_1323 1
+
+
 int msr_corepmu_setup(int msr_file, int nr_events, uint64_t *event);
 int msr_corepmu_read(int msr_file, int nr_events, uint64_t *result, uint64_t *inst_retired, uint64_t *cpu_cycles);
 

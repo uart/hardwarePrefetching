@@ -325,33 +325,9 @@ static void *thread_start(void *arg)
 		if(tstate->core_id == core_first){
 			//wait for all threads
 			while(syncflag < ACTIVE_THREADS);
-
-			// Determine if MAB Dynamic SD mode is active, and calculate settings if below threshold
 			
-			// Flag to determine if calculate_settings should be called
-			int should_calculate_settings = 1;
+			calculate_settings();
 
-			if (tunealg == MAB && (mstate.dynamic_sd == ON || mstate.dynamic_sd == STEP)) {
-				float ipc = (double)gtinfo[1].instructions_retired / (double)gtinfo[1].cpu_cycles;
-				float sd_mean = update_and_fetch_sd_mean(&mstate, ipc);
-
-				if (sd_mean > mstate.sd_mean_threshold) {
-					if (mstate.dynamic_sd == ON) {
-						logd(TAG, "High SD MAB Sleep Mode\n");
-						setup_arm(&mstate, next_arm_default, update_selections_none);
-						should_calculate_settings = 0;
-					} else if (mstate.dynamic_sd == STEP && time_intervall < MAX_TIME_INTERVAL) {
-						time_intervall = MAX_TIME_INTERVAL;
-						logd(TAG, "Switching to time interval %f\n", time_intervall);
-					}
-				} else if (mstate.dynamic_sd == STEP && sd_mean < mstate.sd_mean_threshold && time_intervall > MIN_TIME_INTERVAL) {
-					time_intervall = MIN_TIME_INTERVAL;
-					logd(TAG, "Switching to time interval %f\n", time_intervall);
-				}
-			}
-			if (should_calculate_settings) {
-				calculate_settings();
-			}
 
 			syncflag = 0; //done, release threads
 		}else if(CORE_IN_MODULE == 0){ //only the primary core per module needs to sync, rest can run free

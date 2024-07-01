@@ -9,5 +9,5 @@
   "dynamic_sd": 1,
   "ipc_window_size": 100,
   "sd_window_size": 500,
-  "sd_mean_threshold": 0.1
+  "sd_mean_threshold": 0.3
 }

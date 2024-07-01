@@ -214,10 +214,36 @@ float update_and_fetch_sd_mean(mab_state *mstate, float new_ipc) {
     return mstate->current_sd_mean;
 }
 
+int check_dynamic_sd(mab_state *mstate) {
+    if (mstate->dynamic_sd == ON || mstate->dynamic_sd == STEP) {
+        float ipc = (double)gtinfo[1].instructions_retired / (double)gtinfo[1].cpu_cycles;
+        float sd_mean = update_and_fetch_sd_mean(mstate, ipc);
+
+        if (sd_mean > mstate->sd_mean_threshold) {
+            if (mstate->dynamic_sd == ON) {
+                logd(TAG, "High SD MAB Sleep Mode\n");
+                return 1;
+            } else if (mstate->dynamic_sd == STEP && time_intervall < MAX_TIME_INTERVAL) {
+                time_intervall = MAX_TIME_INTERVAL;
+                logd(TAG, "Switching to time interval %f\n", time_intervall);
+            }
+        } else if (mstate->dynamic_sd == STEP && sd_mean < mstate->sd_mean_threshold && time_intervall > MIN_TIME_INTERVAL) {
+            time_intervall = MIN_TIME_INTERVAL;
+            logd(TAG, "Switching to time interval %f\n", time_intervall);
+        }
+    }
+    return 0;
+}
+
 
 // Main MAB algorithm
 
 int mab(mab_state *mstate) {
+
+    if (check_dynamic_sd(mstate)) { // Is Dynamic SD filtering active?
+        setup_arm(mstate, next_arm_default, update_selections_none);
+        return 0;
+    }
 
     if (mstate->algorithm == RANDOM) {
         setup_arm(mstate, next_arm_random, update_selections_increment);

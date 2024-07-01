@@ -28,5 +28,6 @@ extern struct thread_state gtinfo[MAX_THREADS]; //global thread state
 extern int core_last;
 extern int core_first;
 extern int tunealg;
+extern float time_intervall;
 
 #endif

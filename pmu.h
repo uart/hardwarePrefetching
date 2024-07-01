@@ -46,7 +46,7 @@ struct ddr_s{
 
 
 int pmu_core_config(int msr_file);
-int pmu_core_read(int msr_file, uint64_t *result_p);
+int pmu_core_read(int msr_file, uint64_t *result_p, uint64_t *inst_retired, uint64_t *cpu_cycles);
 
 int pmu_ddr_init(struct ddr_s *ddr);
 uint64_t pmu_ddr(struct ddr_s *ddr, int type);

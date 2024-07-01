@@ -70,6 +70,15 @@ struct msr1324_s{
 	uint64_t L1_HOMELESS_THRESHOLD : 8;
 };
 
+struct msr1A4_s{
+	uint64_t L2_STREAM_DISABLED : 1;
+	uint64_t pad0 : 1;
+	uint64_t L1_DATA_STREAM_DISABLED : 1;
+	uint64_t L1_INSTRUCTION_STREAM_DISABLED : 1;
+	uint64_t L1_NEXT_PAGE_DISABLED : 1;
+	uint64_t L2_AMP_DISABLED : 1;
+};
+
 
 union msr_u{
 	struct msr1320_s msr1320;
@@ -77,6 +86,7 @@ union msr_u{
 	struct msr1322_s msr1322;
 	struct msr1323_s msr1323;
 	struct msr1324_s msr1324;
+	struct msr1A4_s msr1A4;
 	uint64_t v;
 };
 

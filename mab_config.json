@@ -1,0 +1,13 @@
+{
+  "algorithm": "DUCB",
+  "arm_configuration": 0,
+  "epsilon": 0.1,
+  "gamma": 0.99,
+  "c": 0.001,
+  "normalisation": 3,
+  "norm_freq": 1000,
+  "dynamic_sd": 1,
+  "ipc_window_size": 100,
+  "sd_window_size": 500,
+  "sd_mean_threshold": 0.3
+}

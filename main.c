@@ -18,6 +18,7 @@
 #include "pmu.h"
 #include "msr.h"
 #include "log.h"
+#include "rdt_mbm.h"
 
 #define TAG "MAIN"
 
@@ -33,20 +34,21 @@ int core_first = 0;
 int core_last = 0;
 float aggr = 1.0; //retuning aggressiveness
 int tunealg = 0;
+uint32_t rdt_enabled = 0;
 
 #define ACTIVE_THREADS (core_last - core_first + 1)
 
 //global runtime
 volatile int quitflag = 0;
 volatile int syncflag = 0;
-
+volatile int msr_file_id[MAX_NUM_CORES];
 
 struct ddr_s ddr;
 
 void sigintHandler(int sig_num)
 {
 	//rework this to wake up the other threads and clean them up in a nice way
-	printf("sig %d, terminating dPF... hold on\n", sig_num);
+	loga(TAG, "sig %d, terminating dPF... hold on\n", sig_num);
 
 	if (tunealg == MAB && (mstate.dynamic_sd == ON || mstate.dynamic_sd == STEP)) {
 		free(mstate.ipc_buffer);
@@ -57,6 +59,8 @@ void sigintHandler(int sig_num)
 
 	quitflag = 1;
 	//sleep(time_intervall * 2); 
+	if (rdt_enabled)
+		rdt_mbm_reset();
 	exit(1);
 }
 
@@ -69,16 +73,27 @@ uint64_t time_ms()
     return (uint64_t)(time.tv_nsec / 1000000) + ((uint64_t)time.tv_sec * 1000ull);
 }
 
-//https://www.intel.com/content/www/us/en/developer/articles/guide/12th-gen-intel-core-processor-gamedev-guide.html
-int get_cpuid(uint64_t leaf, uint64_t *rax, uint64_t *rbx, uint64_t *rcx, uint64_t *rdx)
+// Ref: Intel® 64 and IA-32 Architectures Software Developer Manuals - Volume 3
+// Table 3-8 Information Returned by CPUID Instruction
+int
+lcpuid(const unsigned leaf, const unsigned subleaf, struct cpuid_out *out)
 {
-	asm volatile (
-		"\txchg %%rbx, %%rdi\n"
-		"\tcpuid\n"
- 		"\txchg %%rbx, %%rdi"
-		: "=a" (*rax), "=D" (*rbx), "=c" (*rcx), "=d" (*rdx)
-		: "a" (leaf));
+	if (out == NULL) {
+		loge(TAG, "lcpuid(): NULL pointer error\n");
+		return -1;
+	}
 
+        asm volatile("mov %4, %%eax\n\t"
+                     "mov %5, %%ecx\n\t"
+                     "cpuid\n\t"
+                     "mov %%eax, %0\n\t"
+                     "mov %%ebx, %1\n\t"
+                     "mov %%ecx, %2\n\t"
+                     "mov %%edx, %3\n\t"
+                     : "=g"(out->eax), "=g"(out->ebx), "=g"(out->ecx),
+                       "=g"(out->edx)
+                     : "g"(leaf), "g"(subleaf)
+                     : "%eax", "%ebx", "%ecx", "%edx");
 	return 0;
 }
 
@@ -94,8 +109,12 @@ int calculate_settings()
 		// Grab all PMU data
 		//
 
-		ddr_rd_bw = pmu_ddr(&ddr, DDR_RD_BW);
-		//logd(TAG, "DDR RD BW: %ld MB/s\n", ddr_rd_bw/(1024*1024));
+		if (!rdt_enabled) {
+			ddr_rd_bw = pmu_ddr(&ddr, DDR_RD_BW);
+		} else
+			ddr_rd_bw = rdt_mbm_bw_get();
+
+		loga(TAG, "DDR RD BW: %ld MB/s\n", ddr_rd_bw/(1024*1024));
 
 		if(time_old == 0){
 			time_old = time_ms();
@@ -108,7 +127,7 @@ int calculate_settings()
 
 		float ddr_rd_percent = ((float)ddr_rd_bw/(1024*1024)) / (float)ddr_bw_target;
 		ddr_rd_percent /= time_delta;
-		logd(TAG, "Time delta %f, Running at %.1f percent rd bw (%ld MB/s)\n", time_delta, ddr_rd_percent * 100, ddr_rd_bw/(1024*1024));
+		loga(TAG, "Time delta %f, Running at %.1f percent rd bw (%ld MB/s)\n", time_delta, ddr_rd_percent * 100, ddr_rd_bw/(1024*1024));
 
 	//	float l2_l3_ddr_hits[ACTIVE_THREADS];
 
@@ -276,9 +295,10 @@ static void *thread_start(void *arg)
 
 	logd(TAG, "Thread running on core %d, this is #%d core in the module\n", tstate->core_id, CORE_IN_MODULE);
 
-	uint64_t rax, rbx, rcx, rdx;
-	get_cpuid(0x1a, &rax, &rbx, &rcx, &rdx);
-	logd(TAG, "CPUID Coretype 0x%lx\n", rax);
+	struct cpuid_out res;
+
+	lcpuid(0x1a, 0, &res);
+	logd(TAG, "CPUID Coretype 0x%X\n", res.eax);
 
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
@@ -289,7 +309,8 @@ static void *thread_start(void *arg)
 		loge(TAG, "Could not set thread affinity for coreid %d, pthread_setaffinity_np()\n", tstate->core_id);
 	}
 
-	msr_file = msr_int(tstate->core_id, tstate->hwpf_msr_value);
+	msr_file = msr_init(tstate->core_id, tstate->hwpf_msr_value);
+
 	msr_hwpf_write(msr_file, tstate->hwpf_msr_value);
 
 	msr_enable_fixed(msr_file);
@@ -348,7 +369,7 @@ static void *thread_start(void *arg)
 	}
 
 	close(msr_file);
-	printf("Thread on core %d done\n", tstate->core_id);
+	logi(TAG, "Thread on core %d done\n", tstate->core_id);
 
 	return 0;
 }
@@ -375,17 +396,20 @@ int main(int argc, char *argv[])
 {
 	int c;
 
-	log_setlevel(5);
+	log_setlevel(3);
 	loga(TAG, "This is the main file for the UU Hardware Prefetch and Control project\n");
 
 	signal(SIGINT, sigintHandler);
 
-	uint64_t rax, rbx, rcx, rdx;
+	struct cpuid_out res;
 
-	get_cpuid(0x01, &rax, &rbx, &rcx, &rdx);
-	printf("CPUID Platform: 0x%lx\n", rax);
-	get_cpuid(0x07, &rax, &rbx, &rcx, &rdx);
-	printf("CPUID Hybrid? 0x%lx\n", rdx);
+	lcpuid(0x01, 0, &res);
+	logi(TAG, "CPUID Platform: 0x%X\n", res.eax);
+	lcpuid(0x07, 0, &res);
+	if (res.edx & (1 << 15))
+		logi(TAG, "Hybrid CPU Detected\n");
+	else
+		logi(TAG, "Not Hybrid CPU\n");
 
 	//decode command-line
 	while (1) {
@@ -454,7 +478,20 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	pmu_ddr_init(&ddr);
+	int ret_val = rdt_mbm_support_check();
+
+	if (!ret_val) {
+		logi(TAG, "RDT MBM supported\n");
+		ret_val = rdt_mbm_init();
+		if (ret_val) {
+			loge(TAG, "Error in initializing RDT MBM\n");
+			return ret_val;
+		}
+		rdt_enabled = 1;
+	} else {
+		logi(TAG, "RDT MBM not supported\n");
+		pmu_ddr_init(&ddr);
+	}
 
 	if (tunealg == 2) {mab_init(&mstate, ACTIVE_THREADS);}
 
@@ -471,7 +508,8 @@ int main(int argc, char *argv[])
 
 	close(ddr.mem_file);
 
-	printf("done!");
+	rdt_mbm_reset();
+	loga(TAG, "Done!\n");
 
 	return 0;
 }

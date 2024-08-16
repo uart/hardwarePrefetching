@@ -20,11 +20,8 @@
 
 #define TAG "MSR"
 
-
-//
-// Open and read MSR values
-//
-int msr_int(int core, union msr_u msr[])
+// Open MSR file
+int msr_open(int core)
 {
 	int msr_file;
 	char filename[128];
@@ -36,7 +33,19 @@ int msr_int(int core, union msr_u msr[])
 		 loge(TAG, "Could not open MSR file %s, running as root/sudo?\n", filename);
 		exit(-1);
 	}
+	return msr_file;
+}
+//
+// Open and read MSR values
+//
+int msr_init(int core, union msr_u msr[])
+{
+	int msr_file;
 
+	if (msr_file_id[core])
+		msr_file = msr_file_id[core];
+	else
+		msr_file = msr_open(core);
 	for(int i = 0; i < HWPF_MSR_FIELDS-1; i++){
 		if(pread(msr_file, &msr[i], 8, HWPF_MSR_BASE + i) != 8){
 			 loge(TAG, "Could not read MSR on core %d, is that an atom core?\n", core);
@@ -45,6 +54,8 @@ int msr_int(int core, union msr_u msr[])
 
 		//logd(TAG, "0x%x: 0x%lx\n", HWPF_MSR_BASE + i, msr[i].v);
 	}
+	msr_file_id[core] = msr_file;
+
 
     if(pread(msr_file, &msr[HWPF_MSR_FIELDS-1], 8, HWPF_MSR_0X1A4) != 8){
 			 loge(TAG, "Could not read MSR on core %d, is that an atom core?\n", core);
@@ -611,4 +622,102 @@ void populate_msr1323(union msr_u msr[]) {
     msr[3].msr1323.L2_STREAM_AMP_CREATE_PFIPP = L2_STREAM_AMP_CREATE_PFIPP_1323;
     msr[3].msr1323.STABILIZE_PREF_ON_PFNPP = STABILIZE_PREF_ON_PFNPP_1323;
     msr[3].msr1323.STABILIZE_PREF_ON_PFIPP = STABILIZE_PREF_ON_PFIPP_1323;
+}
+
+// Get RMID from PQOS ASSOC MSR
+int msr_get_rmid(int core, uint64_t *val)
+{
+	uint64_t data;
+
+	if (pread(msr_file_id[core], &data, sizeof data, PQOS_MSR_ASSOC) != sizeof data) {
+		if (errno == EIO) {
+			fprintf(stderr, "rdmsr: CPU %d cannot read "
+				"MSR 0x%X\n",
+				core, PQOS_MSR_ASSOC);
+			exit(4);
+		} else {
+			perror("rdmsr: pread");
+			exit(127);
+		}
+	}
+
+	*val = data;
+	return 0;
+}
+
+// Set RMID on PQOS ASSOC MSR
+int msr_set_rmid(unsigned core, uint64_t rmid)
+{
+	if (pwrite(msr_file_id[core], &rmid, sizeof(rmid), PQOS_MSR_ASSOC) != sizeof(rmid)) {
+		if (errno == EIO) {
+			fprintf(stderr,
+				"msr_set_rmid(): CPU %d cannot set MSR "
+				"0x%X to 0x%lX\n",
+				core, PQOS_MSR_ASSOC, rmid);
+			return -1;
+		} else {
+			perror("msr_set_rmid(): pwrite");
+			exit(127);
+		}
+	}
+
+	return 0;
+}
+
+int msr_get_evtsel(unsigned core, uint64_t *event)
+{
+	uint64_t data;
+
+	if (pread(msr_file_id[core], &data, sizeof data, PQOS_MSR_MON_EVTSEL) != sizeof data) {
+		if (errno == EIO) {
+			fprintf(stderr, "msr_get_evtsel: CPU %d cannot read "
+				"MSR 0x%X\n",
+				core, PQOS_MSR_MON_EVTSEL);
+			exit(4);
+		} else {
+			perror("msr_get_evtsel: pread");
+			exit(127);
+		}
+	}
+
+	*event = data;
+	return 0;
+}
+
+int msr_set_evtsel(unsigned core, uint64_t event)
+{
+	if (pwrite(msr_file_id[core], &event, sizeof(event), PQOS_MSR_MON_EVTSEL) != sizeof(event)) {
+		if (errno == EIO) {
+			fprintf(stderr,
+				"msr_set_evtsel(): CPU %d cannot set MSR "
+				"0x%X to 0x%lX\n",
+				core, PQOS_MSR_MON_EVTSEL, event);
+			return -1;
+		} else {
+			perror("msr_set_evtsel(): pwrite");
+			exit(127);
+		}
+	}
+
+	return 0;
+}
+
+int msr_get_mon_count(int core, uint64_t *val)
+{
+	uint64_t data;
+
+	if (pread(msr_file_id[core], &data, sizeof data, PQOS_MSR_MON_QMC) != sizeof data) {
+		if (errno == EIO) {
+			fprintf(stderr, "rdmsr: CPU %d cannot read "
+				"MSR 0x%X\n",
+				core, PQOS_MSR_MON_QMC);
+			exit(4);
+		} else {
+			perror("rdmsr: pread");
+			exit(127);
+		}
+	}
+
+	*val = data;
+	return 0;
 }

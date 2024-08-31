@@ -54,11 +54,45 @@
 #define STABILIZE_PREF_ON_PFNPP_1323 1
 #define STABILIZE_PREF_ON_PFIPP_1323 1
 
+#define MAX_NUM_CORES (512)
+
+/**
+ * Allocation & Monitoring association MSR register
+ * - bits [63..32] QE COS
+ * - bits [31..10] Reserved
+ * - bits [9..0] RMID
+ */
+#define PQOS_MSR_ASSOC             0xC8F
+#define PQOS_MSR_ASSOC_QECOS_SHIFT 32
+#define PQOS_MSR_ASSOC_QECOS_MASK  0xffffffff00000000ULL
+#define PQOS_MSR_ASSOC_RMID_MASK   ((1ULL << 10) - 1ULL)
+
+/**
+ * Monitoring event selection MSR register
+ * - bits [63..42] Reserved
+ * - bits [41..32] RMID
+ * - bits [31..8] Reserved
+ * - bits [7..0] Event ID
+ */
+#define PQOS_MSR_MON_EVTSEL            0xC8D
+#define PQOS_MSR_MON_EVTSEL_RMID_SHIFT 32
+#define PQOS_MSR_MON_EVTSEL_RMID_MASK  ((1ULL << 10) - 1ULL)
+#define PQOS_MSR_MON_EVTSEL_EVTID_MASK ((1ULL << 8) - 1ULL)
+
+/**
+ * Monitoring data read MSR register
+ */
+#define PQOS_MSR_MON_QMC             0xC8E
+#define PQOS_MSR_MON_QMC_DATA_MASK   ((1ULL << 62) - 1ULL)
+#define PQOS_MSR_MON_QMC_ERROR       (1ULL << 63)
+#define PQOS_MSR_MON_QMC_UNAVAILABLE (1ULL << 62)
+
+extern volatile int msr_file_id[MAX_NUM_CORES];
 
 int msr_corepmu_setup(int msr_file, int nr_events, uint64_t *event);
 int msr_corepmu_read(int msr_file, int nr_events, uint64_t *result, uint64_t *inst_retired, uint64_t *cpu_cycles);
-
-int msr_int(int core, union msr_u msr[]);
+int msr_open(int core);
+int msr_init(int core, union msr_u msr[]);
 int msr_hwpf_write(int msr_file, union msr_u msr[]);
 
 int msr_fixed_int(int core);
@@ -162,6 +196,18 @@ void populate_msr1321(union msr_u msr[]);
 void populate_msr1322(union msr_u msr[]);
 void populate_msr1323(union msr_u msr[]);
 
+int msr_get_rmid(int core, uint64_t *val);
+
+/* Set RMID on Allocation & Monitoring association MSR */
+int msr_set_rmid(unsigned core, uint64_t rmid);
+
+/* Get RDT MBM monitoring event */
+int msr_get_evtsel(unsigned core, uint64_t *event);
+
+/* Set RDT MBM monitoring event */
+int msr_set_evtsel(unsigned core, uint64_t event);
+/* Get RDT MBM monitoring count */
+int msr_get_mon_count(int core, uint64_t *val);
 #endif
 
 

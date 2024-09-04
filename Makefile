@@ -6,8 +6,8 @@ TARGET = dpf
 
 all: $(TARGET)
 
-$(TARGET): main.c log.c msr.c pmu.c mab.c mab_setup.c rdt_mbm.c
-	$(CC) $(CFLAGS) -o $(TARGET) main.c log.c msr.c pmu.c mab.c mab_setup.c rdt_mbm.c $(LDFLAGS)
+$(TARGET): main.c log.c msr.c pmu.c mab.c mab_setup.c rdt_mbm.c sysdetect.c
+	$(CC) $(CFLAGS) -o $(TARGET) main.c log.c msr.c pmu.c mab.c mab_setup.c rdt_mbm.c sysdetect.c $(LDFLAGS)
 
 clean:
 	rm -f $(TARGET)

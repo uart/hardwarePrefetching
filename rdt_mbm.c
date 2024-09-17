@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <cpuid.h>
 #if 0
 #include <string.h>
 #include <errno.h>
@@ -16,6 +17,11 @@
 #include "rdt_mbm.h"
 
 #define TAG "RDT_MBM"
+
+#define EAX (0)
+#define EBX (1)
+#define ECX (2)
+#define EDX (3)
 
 struct mbm_data_st mbm_data[MAX_NUM_CORES];
 uint64_t total_mbt = 0;
@@ -33,14 +39,15 @@ int lcpuid(const unsigned leaf, const unsigned subleaf, struct cpuid_out *out);
 int
 rdt_mbm_support_check(void)
 {
+	unsigned int reg[4];
 	/* Refer Intel Software developers manual, section 18.18.2 Enabling Monitoring: Usage Flow */
-	struct cpuid_out res;
+
         /**
          * Run CPUID.0x7.0 to check
          * for quality monitoring capability (bit 12 of ebx)
          */
-        lcpuid(0x7, 0x0, &res);
-        if (!(res.ebx & (1 << 12))) {
+        __cpuid_count(0x07, 0x00, reg[0], reg[1], reg[2], reg[3]);
+        if (!(reg[EBX] & (1 << 12))) {
                 logd(TAG, "CPUID.0x7.0: Memory Monitoring capability not supported!\n");
                 return -1;
         }
@@ -49,8 +56,8 @@ rdt_mbm_support_check(void)
          * We can go to CPUID.0xf.0 for further
          * exploration of monitoring capabilities
          */
-        lcpuid(0xf, 0x0, &res);
-        if (!(res.edx & (1 << 1))) {
+        __cpuid_count(0x0f, 0x00, reg[0], reg[1], reg[2], reg[3]);
+        if (!(reg[EDX] & (1 << 1))) {
                 loge(TAG, "CPUID.0xf.0: Monitoring capability not supported!\n");
                 return -2;
         }
@@ -58,21 +65,21 @@ rdt_mbm_support_check(void)
        /**
          * MAX_RMID for the socket
          */
-        max_rmid = (unsigned)res.ebx + 1;
+        max_rmid = (unsigned)reg[EBX] + 1;
 	logd(TAG, "rdt_mbm_support_check(): max_rmid %u\n", max_rmid);
 
 	/** Query resource monitoring. Refer section 18.18.5.2  */
-	lcpuid(0xf, 1, &res);
-	if (!(res.edx & PQOS_CPUID_MON_TMEM_BW_BIT)) {
+        __cpuid_count(0x0f, 0x01, reg[0], reg[1], reg[2], reg[3]);
+	if (!(reg[EDX] & PQOS_CPUID_MON_TMEM_BW_BIT)) {
 		loge(TAG, "CPUID.0xf.1: Total memory BW not supported!\n");
                 return -3;
 	}
-	if (!(res.edx & PQOS_CPUID_MON_LMEM_BW_BIT)) {
+	if (!(reg[EDX] & PQOS_CPUID_MON_LMEM_BW_BIT)) {
 		loge(TAG, "CPUID.0xf.1: Local memory BW not supported!\n");
                 return -4;
 	}
-	scale_factor = res.ebx;
-        counter_length = (res.eax & 0x7f) + MIN_MBM_COUNTER_LEN;
+	scale_factor = reg[EBX];
+        counter_length = (reg[EAX] & 0x7f) + MIN_MBM_COUNTER_LEN;
 	logd(TAG, "counter_length %u, scale_factor %u\n",
 		counter_length, scale_factor);
 

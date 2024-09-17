@@ -62,7 +62,7 @@ void sigintHandler(int sig_num)
 	}
 
 	quitflag = 1;
-	//sleep(time_intervall * 2); 
+	//sleep(time_intervall * 2);
 	if (rdt_enabled)
 		rdt_mbm_reset();
 	exit(1);
@@ -77,30 +77,6 @@ uint64_t time_ms()
     return (uint64_t)(time.tv_nsec / 1000000) + ((uint64_t)time.tv_sec * 1000ull);
 }
 
-
-// Ref: Intel® 64 and IA-32 Architectures Software Developer Manuals - Volume 3
-// Table 3-8 Information Returned by CPUID Instruction
-int
-lcpuid(const unsigned leaf, const unsigned subleaf, struct cpuid_out *out)
-{
-	if (out == NULL) {
-		loge(TAG, "lcpuid(): NULL pointer error\n");
-		return -1;
-	}
-
-        asm volatile("mov %4, %%eax\n\t"
-                     "mov %5, %%ecx\n\t"
-                     "cpuid\n\t"
-                     "mov %%eax, %0\n\t"
-                     "mov %%ebx, %1\n\t"
-                     "mov %%ecx, %2\n\t"
-                     "mov %%edx, %3\n\t"
-                     : "=g"(out->eax), "=g"(out->ebx), "=g"(out->ecx),
-                       "=g"(out->edx)
-                     : "g"(leaf), "g"(subleaf)
-                     : "%eax", "%ebx", "%ecx", "%edx");
-	return 0;
-}
 
 int calculate_settings()
 {
@@ -300,11 +276,6 @@ static void *thread_start(void *arg)
 
 	logd(TAG, "Thread running on core %d, this is #%d core in the module\n", tstate->core_id, CORE_IN_MODULE);
 
-//	struct cpuid_out res;
-
-//	lcpuid(0x1a, 0, &res);
-//	logd(TAG, "CPUID Coretype 0x%X\n", res.eax);
-
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
 	CPU_SET(tstate->core_id, &cpuset);
@@ -427,17 +398,6 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sigintHandler);
 
-/*	struct cpuid_out res;
-
-	lcpuid(0x01, 0, &res);
-	logi(TAG, "CPUID Platform: 0x%X\n", res.eax);
-	lcpuid(0x07, 0, &res);
-	if (res.edx & (1 << 15))
-		logi(TAG, "Hybrid CPU Detected\n");
-	else
-		logi(TAG, "Not Hybrid CPU\n");
-*/
-
 	//decode command-line
 	while (1) {
 		static struct option long_options[] = {
@@ -514,25 +474,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	int ret_val = rdt_mbm_support_check();
-
-	if (!ret_val) {
-		logi(TAG, "RDT MBM supported\n");
-		ret_val = rdt_mbm_init();
-		if (ret_val) {
-			loge(TAG, "Error in initializing RDT MBM\n");
-			return ret_val;
-		}
-		rdt_enabled = 1;
-	} else {
-		logi(TAG, "RDT MBM not supported\n");
-		pmu_ddr_init(&ddr);
-	}
-
-	if (tunealg == 2) {mab_init(&mstate, ACTIVE_THREADS);}
-
-//	printf("main mmap_ddr0 %p\n", mmap_ddr0);
-//	pmu_ddr_rd(&mmap_ddr0, &mmap_ddr1);
 
 	//--core has not been used, so let's autodetect
 	if(core_first == -1 || core_last == -1){
@@ -549,6 +490,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	//--ddrbw-set / ddrbw-test has not been used, so use ddrbw-auto
 	if(ddr_bw_target == DDR_BW_NOT_SET){
 		ddr_bw_target = dmi_get_bandwidth() * ddr_bw_auto_utilization;
 		logv(TAG, "DDR BW target set to %d MB/s\n", ddr_bw_target);
@@ -558,6 +500,28 @@ int main(int argc, char *argv[])
 
 			return -1;
 		}
+	}
+
+
+	//DDR init, with RDT if supported (servers)
+	int ret_val = rdt_mbm_support_check();
+
+	if (!ret_val) {
+		logi(TAG, "RDT MBM supported\n");
+		ret_val = rdt_mbm_init();
+		if (ret_val) {
+			loge(TAG, "Error in initializing RDT MBM\n");
+			return ret_val;
+		}
+		rdt_enabled = 1;
+	} else {
+		logi(TAG, "RDT MBM not supported\n");
+		pmu_ddr_init(&ddr);
+	}
+
+	//Algorithm init
+	if (tunealg == 2){
+		mab_init(&mstate, ACTIVE_THREADS);
 	}
 
 	//Initialization done - let's start running...

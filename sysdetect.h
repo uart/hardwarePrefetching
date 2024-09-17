@@ -73,5 +73,5 @@ struct __attribute__((packed)) type17_s {
 
 
 struct e_cores_layout_s get_efficient_core_ids();
-
+int dmi_get_bandwidth();
 #endif

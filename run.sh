@@ -2,4 +2,6 @@
 # - we can only tune the E-cores
 #Update every one second
 #Set a target DDR Bandwidth, depending on your DDR config
-./dpf --core 16-31 --intervall 1 --ddrbw 46000
+./dpf --log 4 --intervall 1
+#./dpf --log 4 --intervall 1 --ddrbw-set 46000
+#./dpf --core 16-31 --intervall 1 --ddrbw-set 46000

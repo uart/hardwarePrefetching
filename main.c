@@ -19,19 +19,23 @@
 #include "msr.h"
 #include "log.h"
 #include "rdt_mbm.h"
+#include "sysdetect.h"
 
 #define TAG "MAIN"
 
 //which core is this in the 4 core module? i.e. 0..3
 #define CORE_IN_MODULE ((tstate->core_id - core_first) % 4)
 
+#define DDR_BW_NOT_SET (-1)
+#define DDR_BW_AUTOTEST (-2)
+
 struct thread_state gtinfo[MAX_THREADS]; //global thread state
 
 //init variables
-int ddr_bw_target = 40000; //MBps (yes, bytes)  //this should be auto-tuned if not set at cmd-line
+int ddr_bw_target = DDR_BW_NOT_SET; //MB/s (yes, bytes). Max _achievable_ bandwidth
 float time_intervall = 1.0; //one second by default
-int core_first = 0;
-int core_last = 0;
+int core_first = -1;
+int core_last = -1;
 float aggr = 1.0; //retuning aggressiveness
 int tunealg = 0;
 uint32_t rdt_enabled = 0;
@@ -58,7 +62,7 @@ void sigintHandler(int sig_num)
 	}
 
 	quitflag = 1;
-	//sleep(time_intervall * 2); 
+	//sleep(time_intervall * 2);
 	if (rdt_enabled)
 		rdt_mbm_reset();
 	exit(1);
@@ -73,29 +77,6 @@ uint64_t time_ms()
     return (uint64_t)(time.tv_nsec / 1000000) + ((uint64_t)time.tv_sec * 1000ull);
 }
 
-// Ref: Intel® 64 and IA-32 Architectures Software Developer Manuals - Volume 3
-// Table 3-8 Information Returned by CPUID Instruction
-int
-lcpuid(const unsigned leaf, const unsigned subleaf, struct cpuid_out *out)
-{
-	if (out == NULL) {
-		loge(TAG, "lcpuid(): NULL pointer error\n");
-		return -1;
-	}
-
-        asm volatile("mov %4, %%eax\n\t"
-                     "mov %5, %%ecx\n\t"
-                     "cpuid\n\t"
-                     "mov %%eax, %0\n\t"
-                     "mov %%ebx, %1\n\t"
-                     "mov %%ecx, %2\n\t"
-                     "mov %%edx, %3\n\t"
-                     : "=g"(out->eax), "=g"(out->ebx), "=g"(out->ecx),
-                       "=g"(out->edx)
-                     : "g"(leaf), "g"(subleaf)
-                     : "%eax", "%ebx", "%ecx", "%edx");
-	return 0;
-}
 
 int calculate_settings()
 {
@@ -295,11 +276,6 @@ static void *thread_start(void *arg)
 
 	logd(TAG, "Thread running on core %d, this is #%d core in the module\n", tstate->core_id, CORE_IN_MODULE);
 
-	struct cpuid_out res;
-
-	lcpuid(0x1a, 0, &res);
-	logd(TAG, "CPUID Coretype 0x%X\n", res.eax);
-
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
 	CPU_SET(tstate->core_id, &cpuset);
@@ -346,7 +322,7 @@ static void *thread_start(void *arg)
 		if(tstate->core_id == core_first){
 			//wait for all threads
 			while(syncflag < ACTIVE_THREADS);
-			
+
 			calculate_settings();
 
 
@@ -364,7 +340,7 @@ static void *thread_start(void *arg)
 			}
 			else {
 				msr_hwpf_write(msr_file, tstate->hwpf_msr_value);
-			}		
+			}
 		}
 	}
 
@@ -384,58 +360,66 @@ int measure_max_ddr_bw()
 
 void print_usage()
 {
-        loga(TAG, "  -i --intervall - update interval in seconds (1-60), default: 1s\n");
-        loga(TAG, "  -c --core - list of cores impacted, e.g. 8-16\n");
-        loga(TAG, "  -d --ddrbw - set DDR bandwidth target in MGbps, (TBD: default is 80% of max measured bandwidth)\n");
-        loga(TAG, "  -a --aggr - set retune aggressiveness (0.1 - 5.0), default 1.0\n");
-        loga(TAG, "  -l --log - set loglevel 1 - 5 (5=debug)\n");
-        loga(TAG, "  -h --help - this info\n");
+	printf("\n*** System settings:\n");
+	printf("Default is to auto-detect Atom E-cores and both Hybrid Clients and E-core servers are supported.\n");
+	printf("The --core argument can be used to direct dPF on only a specific set of cores.\n");
+	printf(" -c --core - set cores to use dPF. Starting from core id 0, e.g. 8-15 for the 9th to 16th core.\n");
+	printf("   --core 8-15\n");
+	printf("\nDDR Bandwith is by default auto-detected based on DMI/BIOS information and target is set to 70%% of\n");
+	printf("theorethical max bandwidth which is typically the achivable bandwidth.\n");
+	printf(" -d --ddrbw-auto - set DDR bandwith from DMI/BIOS to a specific percentage of max. Default is 0.70 (70%%).\n");
+	printf("   --ddrbw-auto 0.65\n");
+	printf(" -t --ddrbw-test - set DDR bandwidth by performing a quick bandwidth test.\n");
+	printf("   --ddrbw-test\n");
+	printf("   Note that this gives a short but high load on the memory subsystem.\n");
+	printf(" -D --ddrbw-set - set DDR bandwidth target in MB/s. This should be the max achievable.\n");
+	printf("   --ddrbw-set 46000\n");
+
+	printf("\n*** Algorithm tuning:\n");
+	printf(" -i --intervall - update interval in seconds (1-60), default: 1\n");
+	printf("   --intervall 2\n");
+	printf(" -A --alg - set tune algorithm, default 0\n");
+	printf("   --alg 2\n");
+	printf(" -a --aggr - set retune aggressiveness (0.1 - 5.0), default 1.0\n");
+	printf("   --aggr 2.0\n");
+
+	printf("\n*** Misc:\n");
+	printf(" -l --log - set loglevel 1 - 5 (5=debug), default: 3\n");
+	printf("   --log 3\n");
+	printf(" -h --help - lists these arguments\n");
 }
 
 int main(int argc, char *argv[])
 {
-	int c;
+	float ddr_bw_auto_utilization = 0.7;
 
 	log_setlevel(3);
 	loga(TAG, "This is the main file for the UU Hardware Prefetch and Control project\n");
 
 	signal(SIGINT, sigintHandler);
 
-	struct cpuid_out res;
-
-	lcpuid(0x01, 0, &res);
-	logi(TAG, "CPUID Platform: 0x%X\n", res.eax);
-	lcpuid(0x07, 0, &res);
-	if (res.edx & (1 << 15))
-		logi(TAG, "Hybrid CPU Detected\n");
-	else
-		logi(TAG, "Not Hybrid CPU\n");
-
 	//decode command-line
 	while (1) {
 		static struct option long_options[] = {
-			{"aggr", required_argument, NULL, 'a'},
-			{"core", required_argument, NULL, 'c'},
-			{"ddrbw", required_argument, NULL, 'd'},
-			{"log", required_argument, NULL, 'l'},
-			{"intervall", required_argument, NULL, 'i'},
-			{"tunealg", required_argument, NULL, 't'},
-			{"help", no_argument, NULL, 'h'},
-			{NULL, no_argument, NULL, 0},
+			{"core",	required_argument,	0, 'c'},
+			{"ddrbw-auto",	required_argument,	0, 'd'},
+			{"ddrbw-test",	no_argument,		0, 't'},
+			{"ddrbw-set",	required_argument,	0, 'D'},
+			{"intervall",	required_argument,	0, 'i'},
+			{"alg",		required_argument,	0, 'A'},
+			{"aggr",	required_argument,	0, 'a'},
+			{"log",		required_argument,	0, 'l'},
+			{"help",	no_argument, 		0, 'h'},
+			{NULL, 		no_argument, 		0, 0},
 		};
 
 		int option_index = 0;
-		//c = getopt_long(argc, argv, "hkm:s:f:a:p:", long_options, &option_index);
-		c = getopt_long(argc, argv, "a:c:d:l:i:t:h", long_options, &option_index);
+		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:h", long_options, &option_index);
 		// end of options
 		if (c == -1) break;
 
 		switch(c) {
-			case 'a':
-				aggr = strtof(optarg, 0);
-                        break;
-
-			case 'c':
+			case 'c': //core
                         	core_first = strtol(optarg, 0, 10);
 				if(strstr(optarg,"-") == NULL)core_last = core_first;
 				else core_last = strtol(strstr(optarg,"-") + 1, 0, 10);
@@ -446,38 +430,80 @@ int main(int argc, char *argv[])
 					loge(TAG, "Too many cores, max is %d\n", MAX_THREADS);
 					return -1;
 				}
-
                         break;
 
-			case 'd':
+			case 'd': //ddrbw-auto
+				//override the 70% utilization factor
+				ddr_bw_auto_utilization = strtof(optarg, NULL);
+                        break;
+
+			case 't': //ddrbw-test
+				ddr_bw_target = DDR_BW_AUTOTEST; //let's auto-test this
+                        break;
+
+			case 'D': //ddrbw-set
 				ddr_bw_target = strtol(optarg, 0, 10);
                         break;
 
-			case 'i':
+			case 'i': //intervall
 				time_intervall = strtof(optarg, NULL);
 				if(time_intervall < 0.0001f)time_intervall = 0.0001f;
 				if(time_intervall > 60.0f) time_intervall = 60.0f;
                         break;
 
-			case 'l':
-				log_setlevel(strtol(optarg, 0, 10));
-                        break;
-
-			case 't':
+			case 'A': //alg
 				tunealg = strtol(optarg, 0, 10);
                         break;
 
-			case 'h':
-			case '?':
+			case 'a': //aggr
+				aggr = strtof(optarg, 0);
+                        break;
+
+			case 'l': //log
+				log_setlevel(strtol(optarg, 0, 10));
+                        break;
+
+			case '?': //getopt returns unknown argument
+			case 'h': //help
 				print_usage();
 				return 0;
                         break;
 		default:
-			loge(TAG, "Error, strange command-line argument\n");
+			loge(TAG, "Error, strange command-line argument %d\n", c);
 			return -1;
 		}
 	}
 
+
+	//--core has not been used, so let's autodetect
+	if(core_first == -1 || core_last == -1){
+		//auto-detect Atom E-cores and set first/last core to max E-cores
+		struct e_cores_layout_s e_cores;
+		e_cores = get_efficient_core_ids();
+		core_first = e_cores.first_efficiency_core;
+		core_last = e_cores.last_efficiency_core;
+
+		if(core_first == -1 || core_last == -1){
+			loge(TAG, "Error, no cores to run on! Do you have Atom E-cores??\n");
+
+			return -1;
+		}
+	}
+
+	//--ddrbw-set / ddrbw-test has not been used, so use ddrbw-auto
+	if(ddr_bw_target == DDR_BW_NOT_SET){
+		ddr_bw_target = dmi_get_bandwidth() * ddr_bw_auto_utilization;
+		logv(TAG, "DDR BW target set to %d MB/s\n", ddr_bw_target);
+
+		if(ddr_bw_target == -1){
+			loge(TAG, "Error, no DDR bandwidth set or detected!\n");
+
+			return -1;
+		}
+	}
+
+
+	//DDR init, with RDT if supported (servers)
 	int ret_val = rdt_mbm_support_check();
 
 	if (!ret_val) {
@@ -493,15 +519,19 @@ int main(int argc, char *argv[])
 		pmu_ddr_init(&ddr);
 	}
 
-	if (tunealg == 2) {mab_init(&mstate, ACTIVE_THREADS);}
+	//Algorithm init
+	if (tunealg == 2){
+		mab_init(&mstate, ACTIVE_THREADS);
+	}
 
-//	printf("main mmap_ddr0 %p\n", mmap_ddr0);
-//	pmu_ddr_rd(&mmap_ddr0, &mmap_ddr1);
+	//Initialization done - let's start running...
 
 	for(int tnum = 0; tnum <= (core_last - core_first); tnum++){
 		gtinfo[tnum].core_id = core_first + tnum;
 		pthread_create(&gtinfo[tnum].thread_id, NULL, &thread_start, &gtinfo[tnum]);
 	}
+
+	//Run forever or until all threads are returning, then we wrap up
 
 	void * ret;
 	pthread_join(gtinfo[0].thread_id, &ret);
@@ -509,7 +539,7 @@ int main(int argc, char *argv[])
 	close(ddr.mem_file);
 
 	rdt_mbm_reset();
-	loga(TAG, "Done!\n");
+	loga(TAG, "dpf finished\n");
 
 	return 0;
 }

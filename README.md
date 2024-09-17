@@ -1,12 +1,56 @@
 # hardwarePrefetching
 Code repository for work on hardware prefetching and controlling hardware prefetchers.
 
-# Multi-armed Bandit Tuning Algorithms
+## Build
+
+Ubuntu: sudo apt install  build-essential libcjson1 libcjson-dev
+
+make
+
+## Run
+
+`sudo ./dpf` or use the `run.sh` example script.  
+Yes - you need to run as root since dPF is changing system settings.
+
+
+## Arguments:
+**System settings:**  
+Default is to auto-detect Atom E-cores and both Hybrid Clients and E-core servers are supported. The `--core` argument can be used to direct dPF on only a specific set of cores.  
+`-c --core` - set cores to use dPF. Starting from core id 0, e.g. 8-15 for the 9th to 16th core.  
+`--core 8-15`
+
+DDR Bandwith is by default auto-detected based on DMI/BIOS information and target is set to 70% of theorethical max bandwidth which is typically the achivable bandwidth.  
+`-d --ddrbw-auto` - set DDR bandwith from DMI/BIOS to a specific percentage of max. Default is 70.  
+`--ddrbw-auto 65`  
+`-t --ddrbw-test` - set DDR bandwidth by performing a quick bandwidth test. Note that this gives a short but high load on the memory subsystem.  
+`--ddrbw-test`  
+`-D --ddrbw-set` - set DDR bandwidth target in MB/s. This should be the max achievable, typically 70% of theorethical bandwidth.  
+`--ddrbw-set 46000`
+
+**Algorithm tuning:**  
+`-i --intervall` - update interval in seconds (1-60), default: 1  
+`--intervall 2`  
+`-A --alg` - set tune algorithm, default 0.  
+`--alg 2`  
+`-a --aggr` - set retune aggressiveness (0.1 - 5.0), default 1.0  
+`--aggr 2.0`
+
+**Misc:**  
+`-l --log` - set loglevel 1 - 5 (5=debug), default: 3  
+`--log 3`  
+`-h --help` - lists these arguments  
+
+
+# Tuning Algorithms
+
+
+## Trivial examples (--alg 0 and --alg 1)
+
+Alg 0 and 1 uses performance monitor events including DDR bandwith to demonstrate a simple tuning method.
+
+## Multi-Armed Bandit (MAB) Algorithms (--alg 2)
 
 This section documents the Multi-Armed Bandit (MAB) tuning algorithms contributed to the dynamic prefetching program. Detailed explanations of the algorithms, hyperparameters, and configurations are provided below. The implementation and analysis of these algorithms can be found in the bachelor's thesis by Daniel Brown, conducted at UART at Uppsala University in collaboration with Intel, which also includes research conducted using the DUCB algorithm. For more details, please contact [daniel.brown@it.uu.se](mailto:daniel.brown@it.uu.se).
-
-## Multi-Armed Bandit (MAB) Algorithms
-
 The following MAB algorithms are implemented in this program:
 
 1. **E-greedy**

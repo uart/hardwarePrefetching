@@ -5,6 +5,8 @@
 #include <cpuid.h>
 #include <sys/sysinfo.h>
 #include <sched.h>
+#include <time.h>
+#include <stdlib.h>
 
 #include "log.h"
 #include "sysdetect.h"
@@ -486,3 +488,131 @@ int dmi_get_bandwidth()
 
         return total_bandwidth;
 }       
+
+
+
+
+
+/*
+        MEASURE MEMORY BANDWIDTH
+*/
+
+uint64_t *parray_one;
+uint64_t *parray_two;
+
+
+
+// It allocates memory for the arrays, checks for successful allocation
+// If memory allocation fails, it logs an error message and returns -1. 
+// On successful initialization, it returns 0.
+int ddrmembw_init()
+{
+        parray_one = (uint64_t *)malloc(sizeof(uint64_t) * BWTEST_ARRAY_SIZE);
+        if (parray_one == NULL){
+                loge(TAG, "Memory allocation failed\n");
+                goto RETURN_ERROR;
+        }
+
+        parray_two = (uint64_t *)malloc(sizeof(uint64_t) * BWTEST_ARRAY_SIZE);
+        if(parray_two == NULL){
+                loge(TAG, "Memory allocation failed\n");
+                goto FREE_ONE;
+        }   
+
+        for (int i = 0; i < BWTEST_ARRAY_SIZE; i++){
+                parray_one[i] = 1.0;
+                parray_two[i] = 0.0;
+        }
+
+        return 0;
+
+
+FREE_ONE:
+	free(parray_one);
+RETURN_ERROR:
+	return -1;
+}
+
+
+
+int ddrmembw_deinit()
+{
+        free(parray_one);
+        free(parray_two);
+
+        return 0;
+}
+
+
+// Copy
+int ddrmembw_copy()
+{
+        for (int i = 0; i < BWTEST_ARRAY_SIZE; i++) {
+                parray_two[i] = parray_one[i];
+        }
+
+        return 0;
+}
+
+
+// Identify the minimum/best execution time
+// It accept an array of execution time
+// It will return the minimum time
+double ddrmembw_min_time(double *time_array)
+{
+        // Check if the array is empty
+        if (time_array[0] == 0)return -1;
+
+        double min = time_array[1];
+
+        for (int i = 1; i < NTIMES; i++) {
+                if (min > time_array[i]) {
+                        min = time_array[i];
+                }
+        }
+
+        return min;
+}
+
+
+// Measures DDR memory bandwidth for the copy operation. It executes the 
+// copy operation multiple times, records the execution time for each run, 
+// and calculates the minimum execution time. The bandwidth in megabytes 
+// per second is then computed based on the minimum time and the total 
+// data transferred, which is logged for performance analysis.
+int ddrmembw_measurement()
+{
+        clock_t start_time, end_time;
+        double bandwidth;
+        size_t total_byte;
+        double time_taken_array[NTIMES];
+        double min_time;
+
+        // perform copy operation by NTIMES
+        // get the various execution time for copy and push to array
+        for (int i = 0; i < NTIMES; i++) {
+                start_time = clock();
+                ddrmembw_copy();
+                end_time = clock();
+                time_taken_array[i] = (double)(end_time - start_time) / 
+                                                        CLOCKS_PER_SEC;
+        }
+
+        min_time = ddrmembw_min_time(time_taken_array);
+
+        if (min_time < 0) {
+                loge(TAG, "No time data available for 'copy' operation\n");
+                return -1;
+        }
+
+        total_byte = 2 * BWTEST_ARRAY_SIZE * sizeof(uint64_t);
+        bandwidth = (total_byte / min_time) / MEGABYTE;
+        logv(TAG, "Bandwidth  Measured: %f\n", bandwidth);
+
+        if (bandwidth < 1){
+                loge(TAG, "bandwidth is %f\n", bandwidth);
+                return 0;
+        }
+        
+        return bandwidth;
+}

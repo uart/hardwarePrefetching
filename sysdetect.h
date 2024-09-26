@@ -10,6 +10,10 @@
 #define DMI_TYPE17_VERSION_FIVE (84)
 #define DMI_TYPE17_VERSION_SIX (92)
 
+#define MEGABYTE (1024 * 1024)
+#define BWTEST_ARRAY_SIZE ((150 * 1024 * 1024) / 8) //150 MB
+#define NTIMES (10)
+
 #define DMI_FILE "/sys/firmware/dmi/tables/DMI"
 
 // Struct to return first and last atom e-cores.
@@ -74,4 +78,7 @@ struct __attribute__((packed)) type17_s {
 
 struct e_cores_layout_s get_efficient_core_ids();
 int dmi_get_bandwidth();
+int ddrmembw_init();
+int ddrmembw_deinit();
+int ddrmembw_measurement();
 #endif

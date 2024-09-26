@@ -45,6 +45,7 @@ uint32_t rdt_enabled = 0;
 //global runtime
 volatile int quitflag = 0;
 volatile int syncflag = 0;
+volatile int ddrbwflag = 0;
 volatile int msr_file_id[MAX_NUM_CORES];
 
 struct ddr_s ddr;
@@ -284,6 +285,36 @@ static void *thread_start(void *arg)
 	if (s != 0){
 		loge(TAG, "Could not set thread affinity for coreid %d, pthread_setaffinity_np()\n", tstate->core_id);
 	}
+
+        if(ddr_bw_target == DDR_BW_AUTOTEST){
+                if (tstate->core_id == core_first){
+                        if(ddrmembw_init() < 0){
+                                exit(-1);
+                        }
+                        ddr_bw_target = 0;        
+                }  
+
+                atomic_fetch_add(&ddrbwflag, 1);
+
+                while(ddrbwflag < ACTIVE_THREADS);
+
+                // BW test assuming idle system. Wiil add ddr PMU counters for 
+                // proper measurement 
+                atomic_fetch_add(&ddr_bw_target, ddrmembw_measurement());
+                
+                atomic_fetch_add(&ddrbwflag, -1);
+
+                while(ddrbwflag != 0);
+
+                if (tstate->core_id == core_first){
+                        logv(TAG, "bandwidth %d MB/s\n", ddr_bw_target);
+                        ddrmembw_deinit();
+                        if(ddr_bw_target == 0){
+                                exit(-1);
+                        }
+                }         
+        }
+        
 
 	msr_file = msr_init(tstate->core_id, tstate->hwpf_msr_value);
 

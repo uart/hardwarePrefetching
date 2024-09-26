@@ -459,9 +459,8 @@ int dmi_get_bandwidth()
 
         // Calculate the theoretical bandwidth for the various type 17
         for (int i = 0; i < type17_count; i++){
-                //  bandwidth = memory speed * 8 bytes per transaction * number 
-                // of channels
-                bandwidth_values[i] = memory_speed * 8 * type17_count;
+                //  bandwidth = memory speed * 8 bytes per transaction  
+                bandwidth_values[i] = memory_speed * 8;
         }
 
         // If check_same_size returns a value greater than zero, then all 

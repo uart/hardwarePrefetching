@@ -69,17 +69,18 @@ void sigintHandler(int sig_num)
 	exit(1);
 }
 
-uint64_t time_ms()
+uint64_t time_ms(void)
 {
-    struct timespec time;
+	struct timespec time;
 
-    clock_gettime(CLOCK_MONOTONIC, &time);
+	clock_gettime(CLOCK_MONOTONIC, &time);
 
-    return (uint64_t)(time.tv_nsec / 1000000) + ((uint64_t)time.tv_sec * 1000ull);
+	return (uint64_t)(time.tv_nsec / 1000000)
+	+((uint64_t)time.tv_sec * 1000ull);
 }
 
 
-int calculate_settings()
+int calculate_settings(void)
 {
 	if (tunealg != MAB) {
 		uint64_t ddr_rd_bw; //only used for the first thread
@@ -91,14 +92,14 @@ int calculate_settings()
 		// Grab all PMU data
 		//
 
-		if (!rdt_enabled) {
+		if (!rdt_enabled)
 			ddr_rd_bw = pmu_ddr(&ddr, DDR_RD_BW);
-		} else
+		else
 			ddr_rd_bw = rdt_mbm_bw_get();
 
 		loga(TAG, "DDR RD BW: %ld MB/s\n", ddr_rd_bw/(1024*1024));
 
-		if(time_old == 0){
+		if (time_old == 0) {
 			time_old = time_ms();
 			return 0; //no selection the first time since all counters will be odd
 		}
@@ -107,7 +108,8 @@ int calculate_settings()
 		time_delta = (time_now - time_old) / 1000.0;
 		time_old = time_now;
 
-		float ddr_rd_percent = ((float)ddr_rd_bw/(1024*1024)) / (float)ddr_bw_target;
+		float ddr_rd_percent = ((float)ddr_rd_bw/(1024*1024))
+				/ (float)ddr_bw_target;
 		ddr_rd_percent /= time_delta;
 		loga(TAG, "Time delta %f, Running at %.1f percent rd bw (%ld MB/s)\n", time_delta, ddr_rd_percent * 100, ddr_rd_bw/(1024*1024));
 
@@ -120,15 +122,26 @@ int calculate_settings()
 		float core_contr_to_ddr[ACTIVE_THREADS];
 
 		int total_ddr_hit = 0;
-		for(int i = 0; i <ACTIVE_THREADS; i++)total_ddr_hit += gtinfo[i].pmu_result[3];
 
-		for(int i = 0; i <ACTIVE_THREADS; i++){
-			l2_hitr[i] = ((float)gtinfo[i].pmu_result[1]) / ((float)(gtinfo[i].pmu_result[1] + gtinfo[i].pmu_result[2] + gtinfo[i].pmu_result[3]));
+		for (int i = 0; i < ACTIVE_THREADS; i++)
+			total_ddr_hit += gtinfo[i].pmu_result[3];
 
-			l3_hitr[i] = ((float)gtinfo[i].pmu_result[2]) / ((float)(gtinfo[i].pmu_result[2] + gtinfo[i].pmu_result[3]));
+		for (int i = 0; i < ACTIVE_THREADS; i++) {
+			l2_hitr[i] = ((float)gtinfo[i].pmu_result[1])
+				/ ((float)(gtinfo[i].pmu_result[1]
+					+ gtinfo[i].pmu_result[2]
+						+ gtinfo[i].pmu_result[3]));
 
-			core_contr_to_ddr[i] = ((float)gtinfo[i].pmu_result[3]) / ((float)total_ddr_hit);
-			good_pf[i] = ((float)gtinfo[i].pmu_result[4]) / ((float)(gtinfo[i].pmu_result[1]) + (gtinfo[i].pmu_result[2]) + (gtinfo[i].pmu_result[3]));
+			l3_hitr[i] = ((float)gtinfo[i].pmu_result[2])
+				/ ((float)(gtinfo[i].pmu_result[2]
+					+ gtinfo[i].pmu_result[3]));
+
+			core_contr_to_ddr[i] = ((float)gtinfo[i].pmu_result
+					[3]) / ((float)total_ddr_hit);
+			good_pf[i] = ((float)gtinfo[i].pmu_result[4]) /
+				((float)(gtinfo[i].pmu_result[1]) +
+					(gtinfo[i].pmu_result[2]) +
+					(gtinfo[i].pmu_result[3]));
 
 
 			logd(TAG, "core %02d PMU delta LD: %10ld  HIT(L2: %.2f  L3: %.2f) DDRpressure: %.2f  GOODPF: %.2f\n", i, gtinfo[i].pmu_result[0],
@@ -139,131 +152,193 @@ int calculate_settings()
 		}
 
 
-		// 
+		//
 		//Now we can make a decission...
 		//
 		// Below are two naive examples of tuning using the L2XQ respective L2 max distance parameter
 		// All cores are set the same at this time
 		//
 
-		if(tunealg == 0){
+		if (tunealg == 0) {
 
-			for(int i = 0; i <ACTIVE_THREADS; i++){
+			for (int i = 0; i < ACTIVE_THREADS; i++) {
 				int l2xq = msr_get_l2xq(&gtinfo[i].hwpf_msr_value[0]);
 				int old_l2xq = l2xq;
 
-				if(ddr_rd_percent < 0.10); //idle system
-				else if(ddr_rd_percent < 0.20)l2xq += lround(-8 * aggr);
-				else if(ddr_rd_percent < 0.30)l2xq += lround(-4 * aggr);
-				else if(ddr_rd_percent < 0.40)l2xq += lround(-2 * aggr);
-				else if(ddr_rd_percent < 0.50)l2xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.60)l2xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.70)l2xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.80)l2xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.90)l2xq += lround(1 * aggr);
-				else if(ddr_rd_percent < 0.93)l2xq += lround(2 * aggr);
-				else if(ddr_rd_percent < 0.96)l2xq += lround(4 * aggr);
-				else l2xq += lround(8 * aggr);
+				if (ddr_rd_percent < 0.10) {
+					//idle system
+				} else if (ddr_rd_percent < 0.20)
+					l2xq += lround(-8 * aggr);
+				else if (ddr_rd_percent < 0.30)
+					l2xq += lround(-4 * aggr);
+				else if (ddr_rd_percent < 0.40)
+					l2xq += lround(-2 * aggr);
+				else if (ddr_rd_percent < 0.50)
+					l2xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.60)
+					l2xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.70)
+					l2xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.80)
+					l2xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.90)
+					l2xq += lround(1 * aggr);
+				else if (ddr_rd_percent < 0.93)
+					l2xq += lround(2 * aggr);
+				else if (ddr_rd_percent < 0.96)
+					l2xq += lround(4 * aggr);
+				else
+					l2xq += lround(8 * aggr);
 
-				if(l2xq <= 0)l2xq = 1;
-				if(l2xq > L2XQ_MAX)l2xq = L2XQ_MAX;
+				if (l2xq <= 0)
+					l2xq = 1;
+				if (l2xq > L2XQ_MAX)
+					l2xq = L2XQ_MAX;
 
-				if(old_l2xq != l2xq){
+				if (old_l2xq != l2xq) {
 					msr_set_l2xq(&gtinfo[i].hwpf_msr_value[0], l2xq);
 					gtinfo[i].hwpf_msr_dirty = 1;
-					if(i == 0)logv(TAG, "l2xq %d\n", l2xq);
+					if (i == 0)
+						logv(TAG, "l2xq %d\n", l2xq);
 				}
 
 
-				int l3xq = msr_get_l3xq(&gtinfo[i].hwpf_msr_value[0]);
+				int l3xq = msr_get_l3xq(
+					&gtinfo[i].hwpf_msr_value[0]);
 				int old_l3xq = l3xq;
 
-				if(ddr_rd_percent < 0.10); //idle system
-				else if(ddr_rd_percent < 0.20)l3xq += lround(-8 * aggr);
-				else if(ddr_rd_percent < 0.30)l3xq += lround(-4 * aggr);
-				else if(ddr_rd_percent < 0.40)l3xq += lround(-2 * aggr);
-				else if(ddr_rd_percent < 0.50)l3xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.60)l3xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.70)l3xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.80)l3xq += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.90)l3xq += lround(1 * aggr);
-				else if(ddr_rd_percent < 0.93)l3xq += lround(2 * aggr);
-				else if(ddr_rd_percent < 0.96)l3xq += lround(4 * aggr);
-				else l3xq += lround(8 * aggr);
+				if (ddr_rd_percent < 0.10);
+					//idle system
+				else if (ddr_rd_percent < 0.20)
+					l3xq += lround(-8 * aggr);
+				else if (ddr_rd_percent < 0.30)
+					l3xq += lround(-4 * aggr);
+				else if (ddr_rd_percent < 0.40)
+					l3xq += lround(-2 * aggr);
+				else if (ddr_rd_percent < 0.50)
+					l3xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.60)
+					l3xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.70)
+					l3xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.80)
+					l3xq += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.90)
+					l3xq += lround(1 * aggr);
+				else if (ddr_rd_percent < 0.93)
+					l3xq += lround(2 * aggr);
+				else if (ddr_rd_percent < 0.96)
+					l3xq += lround(4 * aggr);
+				else
+					l3xq += lround(8 * aggr);
 
-				if(l3xq <= 0)l3xq = 1;
-				if(l3xq > L3XQ_MAX)l3xq = L3XQ_MAX;
+				if (l3xq <= 0)
+					l3xq = 1;
+				if (l3xq > L3XQ_MAX)
+					l3xq = L3XQ_MAX;
 
-				if(old_l3xq != l3xq){
-					msr_set_l3xq(&gtinfo[i].hwpf_msr_value[0], l3xq);
+				if (old_l3xq != l3xq) {
+					msr_set_l3xq(&gtinfo[i].hwpf_msr_value
+								[0], l3xq);
 					gtinfo[i].hwpf_msr_dirty = 1;
-					if(i == 0)logv(TAG, "l3xq %d\n", l3xq);
+					if (i == 0)
+						logv(TAG, "l3xq %d\n", l3xq);
 				}
 			}
 
 
-		} //if(tunealg)...
-		else if(tunealg == 1){
+		} //if (tunealg)...
+		else if (tunealg == 1) {
 			logd(TAG, "L2HR %.2f %.2f %.2f %.2f  %.2f %.2f %.2f %.2f  %.2f %.2f %.2f %.2f  %.2f %.2f %.2f %.2f\n", l2_hitr[0], l2_hitr[1], l2_hitr[2], l2_hitr[3], l2_hitr[4],
 				l2_hitr[5], l2_hitr[6], l2_hitr[7], l2_hitr[8], l2_hitr[9], l2_hitr[10], l2_hitr[11], l2_hitr[12], l2_hitr[13], l2_hitr[14], l2_hitr[15]);
 
-			for(int i = 0; i <ACTIVE_THREADS; i++){
+			for (int i = 0; i < ACTIVE_THREADS; i++) {
 				int l2maxdist = msr_get_l2maxdist(&gtinfo[i].hwpf_msr_value[0]);
 				int old_l2maxdist = l2maxdist;
 
-				if(ddr_rd_percent < 0.10); //idle system
-				else if(ddr_rd_percent < 0.20)l2maxdist += lround(+8 * aggr);
-				else if(ddr_rd_percent < 0.30)l2maxdist += lround(+4 * aggr);
-				else if(ddr_rd_percent < 0.40)l2maxdist += lround(+2 * aggr);
-				else if(ddr_rd_percent < 0.50)l2maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.60)l2maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.70)l2maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.80)l2maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.90)l2maxdist += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.93)l2maxdist += lround(-2 * aggr);
-				else if(ddr_rd_percent < 0.96)l2maxdist += lround(-4 * aggr);
-				else l2maxdist += lround(-8 * aggr);
+				if (ddr_rd_percent < 0.10); //idle system
+				else if (ddr_rd_percent < 0.20)
+					l2maxdist += lround(+8 * aggr);
+				else if (ddr_rd_percent < 0.30)
+					l2maxdist += lround(+4 * aggr);
+				else if (ddr_rd_percent < 0.40)
+					l2maxdist += lround(+2 * aggr);
+				else if (ddr_rd_percent < 0.50)
+					l2maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.60)
+					l2maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.70)
+					l2maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.80)
+					l2maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.90)
+					l2maxdist += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.93)
+					l2maxdist += lround(-2 * aggr);
+				else if (ddr_rd_percent < 0.96)
+					l2maxdist += lround(-4 * aggr);
+				else
+					l2maxdist += lround(-8 * aggr);
 
-				if(l2maxdist <= 0)l2maxdist = 1;
-				if(l2maxdist > L2MAXDIST_MAX)l2maxdist = L2MAXDIST_MAX;
+				if (l2maxdist <= 0)
+					l2maxdist = 1;
+				if (l2maxdist > L2MAXDIST_MAX)
+					l2maxdist = L2MAXDIST_MAX;
 
-				if(old_l2maxdist != l2maxdist){
-					msr_set_l2maxdist(&gtinfo[i].hwpf_msr_value[0], l2maxdist);
+				if (old_l2maxdist != l2maxdist) {
+					msr_set_l2maxdist(
+						&gtinfo[i].hwpf_msr_value[0],
+							l2maxdist);
 					gtinfo[i].hwpf_msr_dirty = 1;
-					if(i == 0)logv(TAG, "l2maxdist %d\n", l2maxdist);
+					if (i == 0)
+						logv(TAG, "l2maxdist %d\n",
+							l2maxdist);
 				}
 
 				int l3maxdist = msr_get_l3maxdist(&gtinfo[i].hwpf_msr_value[0]);
 				int old_l3maxdist = l3maxdist;
 
-				if(ddr_rd_percent < 0.10); //idle system
-				else if(ddr_rd_percent < 0.20)l3maxdist += lround(+8 * aggr);
-				else if(ddr_rd_percent < 0.30)l3maxdist += lround(+4 * aggr);
-				else if(ddr_rd_percent < 0.40)l3maxdist += lround(+2 * aggr);
-				else if(ddr_rd_percent < 0.50)l3maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.60)l3maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.70)l3maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.80)l3maxdist += lround(+1 * aggr);
-				else if(ddr_rd_percent < 0.90)l3maxdist += lround(-1 * aggr);
-				else if(ddr_rd_percent < 0.93)l3maxdist += lround(-2 * aggr);
-				else if(ddr_rd_percent < 0.96)l3maxdist += lround(-4 * aggr);
-				else l3maxdist += lround(-8 * aggr);
+				if (ddr_rd_percent < 0.10); //idle system
+				else if (ddr_rd_percent < 0.20)
+					l3maxdist += lround(+8 * aggr);
+				else if (ddr_rd_percent < 0.30)
+					l3maxdist += lround(+4 * aggr);
+				else if (ddr_rd_percent < 0.40)
+					l3maxdist += lround(+2 * aggr);
+				else if (ddr_rd_percent < 0.50)
+					l3maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.60)
+					l3maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.70)
+					l3maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.80)
+					l3maxdist += lround(+1 * aggr);
+				else if (ddr_rd_percent < 0.90)
+					l3maxdist += lround(-1 * aggr);
+				else if (ddr_rd_percent < 0.93)
+					l3maxdist += lround(-2 * aggr);
+				else if (ddr_rd_percent < 0.96)
+					l3maxdist += lround(-4 * aggr);
+				else
+					l3maxdist += lround(-8 * aggr);
 
-				if(l3maxdist <= 0)l3maxdist = 1;
-				if(l3maxdist > L3MAXDIST_MAX)l3maxdist = L3MAXDIST_MAX;
+				if (l3maxdist <= 0)
+					l3maxdist = 1;
+				if (l3maxdist > L3MAXDIST_MAX)
+					l3maxdist = L3MAXDIST_MAX;
 
-				if(old_l3maxdist != l3maxdist){
+				if (old_l3maxdist != l3maxdist) {
 					msr_set_l3maxdist(&gtinfo[i].hwpf_msr_value[0], l3maxdist);
 					gtinfo[i].hwpf_msr_dirty = 1;
-					if(i == 0)logv(TAG, "l3maxdist %d\n", l3maxdist);
+					if (i == 0)
+						logv(TAG, "l3maxdist %d\n",
+							l3maxdist);
 				}
 
 			}
 		}
-	}
-	else if (tunealg == MAB){
+	} else if (tunealg == MAB)
 		mab(&mstate);
-	}
 
 	return 0;
 }
@@ -278,43 +353,42 @@ static void *thread_start(void *arg)
 	logd(TAG, "Thread running on core %d, this is #%d core in the module\n", tstate->core_id, CORE_IN_MODULE);
 
 	cpu_set_t cpuset;
+
 	CPU_ZERO(&cpuset);
 	CPU_SET(tstate->core_id, &cpuset);
 
-	int s = pthread_setaffinity_np(tstate->thread_id, sizeof(cpuset), &cpuset);
-	if (s != 0){
+	int s = pthread_setaffinity_np
+		(tstate->thread_id, sizeof(cpuset), &cpuset);
+	if (s != 0)
 		loge(TAG, "Could not set thread affinity for coreid %d, pthread_setaffinity_np()\n", tstate->core_id);
+
+	if (ddr_bw_target == DDR_BW_AUTOTEST) {
+		if (tstate->core_id == core_first) {
+			if (ddrmembw_init() < 0)
+				exit(-1);
+			ddr_bw_target = 0;
+		}
+
+		atomic_fetch_add(&ddrbwflag, 1);
+
+		while (ddrbwflag < ACTIVE_THREADS);
+
+		// BW test assuming idle system. Wiil add ddr PMU counters for
+		// proper measurement
+		atomic_fetch_add(&ddr_bw_target, ddrmembw_measurement());
+
+		atomic_fetch_add(&ddrbwflag, -1);
+
+		while (ddrbwflag != 0);
+
+		if (tstate->core_id == core_first) {
+			logv(TAG, "bandwidth %d MB/s\n", ddr_bw_target);
+			ddrmembw_deinit();
+			if (ddr_bw_target == 0)
+				exit(-1);
+		}
 	}
 
-        if(ddr_bw_target == DDR_BW_AUTOTEST){
-                if (tstate->core_id == core_first){
-                        if(ddrmembw_init() < 0){
-                                exit(-1);
-                        }
-                        ddr_bw_target = 0;        
-                }  
-
-                atomic_fetch_add(&ddrbwflag, 1);
-
-                while(ddrbwflag < ACTIVE_THREADS);
-
-                // BW test assuming idle system. Wiil add ddr PMU counters for 
-                // proper measurement 
-                atomic_fetch_add(&ddr_bw_target, ddrmembw_measurement());
-                
-                atomic_fetch_add(&ddrbwflag, -1);
-
-                while(ddrbwflag != 0);
-
-                if (tstate->core_id == core_first){
-                        logv(TAG, "bandwidth %d MB/s\n", ddr_bw_target);
-                        ddrmembw_deinit();
-                        if(ddr_bw_target == 0){
-                                exit(-1);
-                        }
-                }         
-        }
-        
 
 	msr_file = msr_init(tstate->core_id, tstate->hwpf_msr_value);
 
@@ -324,14 +398,14 @@ static void *thread_start(void *arg)
 	pmu_core_config(msr_file);
 
 	// Run until end of world...
-	while(quitflag == 0){
+	while (quitflag == 0) {
 		usleep(time_intervall * 1000000);
 		//logd(TAG, "1. Read Core PMU counters and update stats\n");
 
 		if (tunealg != MAB) {
-			for(int i = 0; i < PMU_COUNTERS; i++)pmu_old[i] = pmu_new[i];
-		}
-		else {
+			for (int i = 0; i < PMU_COUNTERS; i++)
+				pmu_old[i] = pmu_new[i];
+		} else {
 			instructions_old = instructions_new;
 			cpu_cycles_old = cpu_cycles_new;
 		}
@@ -340,38 +414,44 @@ static void *thread_start(void *arg)
 
 
 			if (tunealg != MAB) {
-				for(int i = 0; i < PMU_COUNTERS; i++)tstate->pmu_result[i] = pmu_new[i] - pmu_old[i];
-			}
-			else {
-				tstate->instructions_retired = instructions_new - instructions_old;
-				tstate->cpu_cycles = cpu_cycles_new - cpu_cycles_old;
+				for (int i = 0; i < PMU_COUNTERS; i++)
+					tstate->pmu_result[i] =
+						pmu_new[i] - pmu_old[i];
+			} else {
+				tstate->instructions_retired =
+				instructions_new - instructions_old;
+				tstate->cpu_cycles =
+					cpu_cycles_new - cpu_cycles_old;
 			}
 
 		atomic_fetch_add(&syncflag, 1); //sync by increasing syncflag
 
 		//select out the master core
-		if(tstate->core_id == core_first){
+		if (tstate->core_id == core_first) {
 			//wait for all threads
-			while(syncflag < ACTIVE_THREADS);
+			while (syncflag < ACTIVE_THREADS);
 
 			calculate_settings();
 
 
 			syncflag = 0; //done, release threads
-		}else if(CORE_IN_MODULE == 0){ //only the primary core per module needs to sync, rest can run free
-			while(syncflag != 0); //wait for decission to be made by master
+		} else if (CORE_IN_MODULE == 0) {
+			//only the primary core per module needs to sync,
+			// rest can run free
+			while (syncflag != 0);
+				//wait for decission to be made by master
 		}
 
 		//logd(TAG, "3. Use decission to update MSRs\n");
-		if(CORE_IN_MODULE == 0 && tstate->hwpf_msr_dirty == 1){
+		if (CORE_IN_MODULE == 0 && tstate->hwpf_msr_dirty == 1) {
 			tstate->hwpf_msr_dirty = 0;
 
-			if (tunealg == MAB) {
-				msr_hwpf_write(msr_file, arms.hwpf_msr_values[mstate.arm]);
-			}
-			else {
-				msr_hwpf_write(msr_file, tstate->hwpf_msr_value);
-			}
+			if (tunealg == MAB)
+				msr_hwpf_write(msr_file,
+					arms.hwpf_msr_values[mstate.arm]);
+			else
+				msr_hwpf_write(msr_file,
+					tstate->hwpf_msr_value);
 		}
 	}
 
@@ -440,65 +520,73 @@ int main(int argc, char *argv[])
 			{"alg",		required_argument,	0, 'A'},
 			{"aggr",	required_argument,	0, 'a'},
 			{"log",		required_argument,	0, 'l'},
-			{"help",	no_argument, 		0, 'h'},
-			{NULL, 		no_argument, 		0, 0},
+			{"help",	no_argument,		0, 'h'},
+			{NULL,		no_argument,		0, 0},
 		};
 
 		int option_index = 0;
-		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:h", long_options, &option_index);
+		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:h",
+			long_options, &option_index);
 		// end of options
-		if (c == -1) break;
+		if (c == -1)
+			break;
 
-		switch(c) {
-			case 'c': //core
-                        	core_first = strtol(optarg, 0, 10);
-				if(strstr(optarg,"-") == NULL)core_last = core_first;
-				else core_last = strtol(strstr(optarg,"-") + 1, 0, 10);
+		switch (c) {
+		case 'c': //core
+			core_first = strtol(optarg, 0, 10);
+			if (strstr(optarg, "-") == NULL)
+				core_last = core_first;
+			else
+				core_last = strtol(strstr(optarg, "-")
+					+ 1, 0, 10);
 
-				logi(TAG, "Cores: %d -> %d = %d threads\n", core_first, core_last, core_last - core_first + 1);
+			logi(TAG, "Cores: %d -> %d = %d threads\n", core_first, core_last, core_last - core_first + 1);
 
-				if(core_last - core_first > MAX_THREADS){
-					loge(TAG, "Too many cores, max is %d\n", MAX_THREADS);
-					return -1;
-				}
-                        break;
+			if (core_last - core_first > MAX_THREADS) {
+				loge(TAG, "Too many cores, max is %d\n", MAX_THREADS);
+				return -1;
+			}
+		break;
 
-			case 'd': //ddrbw-auto
-				//override the 70% utilization factor
-				ddr_bw_auto_utilization = strtof(optarg, NULL);
-                        break;
+		case 'd': //ddrbw-auto
+			//override the 70% utilization factor
+			ddr_bw_auto_utilization = strtof(optarg, NULL);
+		break;
 
-			case 't': //ddrbw-test
-				ddr_bw_target = DDR_BW_AUTOTEST; //let's auto-test this
-                        break;
+		case 't': //ddrbw-test
+			ddr_bw_target = DDR_BW_AUTOTEST;
+				//let's auto-test this
+		break;
 
-			case 'D': //ddrbw-set
-				ddr_bw_target = strtol(optarg, 0, 10);
-                        break;
+		case 'D': //ddrbw-set
+			ddr_bw_target = strtol(optarg, 0, 10);
+		break;
 
-			case 'i': //intervall
-				time_intervall = strtof(optarg, NULL);
-				if(time_intervall < 0.0001f)time_intervall = 0.0001f;
-				if(time_intervall > 60.0f) time_intervall = 60.0f;
-                        break;
+		case 'i': //intervall
+			time_intervall = strtof(optarg, NULL);
+			if (time_intervall < 0.0001f)
+				time_intervall = 0.0001f;
+			if (time_intervall > 60.0f)
+				time_intervall = 60.0f;
+		break;
 
-			case 'A': //alg
-				tunealg = strtol(optarg, 0, 10);
-                        break;
+		case 'A': //alg
+			tunealg = strtol(optarg, 0, 10);
+		break;
 
-			case 'a': //aggr
-				aggr = strtof(optarg, 0);
-                        break;
+		case 'a': //aggr
+			aggr = strtof(optarg, 0);
+		break;
 
-			case 'l': //log
-				log_setlevel(strtol(optarg, 0, 10));
-                        break;
+		case 'l': //log
+			log_setlevel(strtol(optarg, 0, 10));
+		break;
 
-			case '?': //getopt returns unknown argument
-			case 'h': //help
-				print_usage();
-				return 0;
-                        break;
+		case '?': //getopt returns unknown argument
+		case 'h': //help
+			print_usage();
+			return 0;
+		break;
 		default:
 			loge(TAG, "Error, strange command-line argument %d\n", c);
 			return -1;
@@ -507,14 +595,15 @@ int main(int argc, char *argv[])
 
 
 	//--core has not been used, so let's autodetect
-	if(core_first == -1 || core_last == -1){
+	if (core_first == -1 || core_last == -1) {
 		//auto-detect Atom E-cores and set first/last core to max E-cores
 		struct e_cores_layout_s e_cores;
+
 		e_cores = get_efficient_core_ids();
 		core_first = e_cores.first_efficiency_core;
 		core_last = e_cores.last_efficiency_core;
 
-		if(core_first == -1 || core_last == -1){
+		if (core_first == -1 || core_last == -1) {
 			loge(TAG, "Error, no cores to run on! Do you have Atom E-cores??\n");
 
 			return -1;
@@ -522,11 +611,11 @@ int main(int argc, char *argv[])
 	}
 
 	//--ddrbw-set / ddrbw-test has not been used, so use ddrbw-auto
-	if(ddr_bw_target == DDR_BW_NOT_SET){
+	if (ddr_bw_target == DDR_BW_NOT_SET) {
 		ddr_bw_target = dmi_get_bandwidth() * ddr_bw_auto_utilization;
 		logv(TAG, "DDR BW target set to %d MB/s\n", ddr_bw_target);
 
-		if(ddr_bw_target == -1){
+		if (ddr_bw_target == -1) {
 			loge(TAG, "Error, no DDR bandwidth set or detected!\n");
 
 			return -1;
@@ -551,20 +640,21 @@ int main(int argc, char *argv[])
 	}
 
 	//Algorithm init
-	if (tunealg == 2){
+	if (tunealg == 2)
 		mab_init(&mstate, ACTIVE_THREADS);
-	}
 
 	//Initialization done - let's start running...
 
-	for(int tnum = 0; tnum <= (core_last - core_first); tnum++){
+	for (int tnum = 0; tnum <= (core_last - core_first); tnum++) {
 		gtinfo[tnum].core_id = core_first + tnum;
-		pthread_create(&gtinfo[tnum].thread_id, NULL, &thread_start, &gtinfo[tnum]);
+		pthread_create(&gtinfo[tnum].thread_id, NULL,
+			&thread_start, &gtinfo[tnum]);
 	}
 
 	//Run forever or until all threads are returning, then we wrap up
 
-	void * ret;
+	void *ret;
+
 	pthread_join(gtinfo[0].thread_id, &ret);
 
 	close(ddr.mem_file);

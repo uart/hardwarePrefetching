@@ -7,7 +7,7 @@
 #include <signal.h>
 
 #include "msr.h"
-#include "pmu.h"
+#include "pmu_core.h"
 #include "log.h"
 
 #define MAX_THREADS (1024)

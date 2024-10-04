@@ -13,7 +13,7 @@
 #include <sys/mman.h>
 
 #include "msr.h"
-#include "pmu.h"
+#include "pmu_core.h"
 #include "log.h"
 #include "mab.h"
 #include "common.h"

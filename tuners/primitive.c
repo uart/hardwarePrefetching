@@ -14,7 +14,8 @@
 #include <sys/mman.h>
 
 #include "common.h"
-#include "pmu.h"
+#include "pmu_core.h"
+#include "pmu_ddr.h"
 #include "msr.h"
 #include "rdt_mbm.h"
 #include "log.h"

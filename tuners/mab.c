@@ -6,7 +6,8 @@
 
 #include "mab.h"
 #include "msr.h"
-#include "pmu.h"
+#include "pmu_core.h"
+#include "pmu_ddr.h"
 #include "log.h"
 #include "common.h"
 

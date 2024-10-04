@@ -16,10 +16,11 @@
 #include "common.h"
 #include "primitive.h"
 #include "mab.h"
-#include "pmu.h"
+#include "pmu_core.h"
+#include "pmu_ddr.h"
+#include "rdt_mbm.h"
 #include "msr.h"
 #include "log.h"
-#include "rdt_mbm.h"
 #include "sysdetect.h"
 
 #define TAG "MAIN"

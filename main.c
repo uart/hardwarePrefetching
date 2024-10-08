@@ -22,6 +22,7 @@
 #include "msr.h"
 #include "log.h"
 #include "sysdetect.h"
+#include "pcie.h"
 
 #define TAG "MAIN"
 
@@ -42,7 +43,6 @@ int core_last = -1;
 float aggr = 1.0; //retuning aggressiveness
 int tunealg = 0;
 uint32_t rdt_enabled = 0;
-
 
 //global runtime
 volatile int quitflag = 0;
@@ -250,6 +250,9 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sigintHandler);
 
+
+	pcie_init();
+
 	//decode command-line
 	while (1) {
 		static struct option long_options[] = {
@@ -401,6 +404,7 @@ int main(int argc, char *argv[])
 	close(ddr.mem_file);
 
 	rdt_mbm_reset();
+	pcie_deinit();
 	loga(TAG, "dpf finished\n");
 
 	return 0;

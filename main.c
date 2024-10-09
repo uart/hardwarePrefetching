@@ -241,6 +241,8 @@ void print_usage()
 	printf(" -h --help - lists these arguments\n");
 }
 
+
+
 int main(int argc, char *argv[])
 {
 	float ddr_bw_auto_utilization = 0.7;
@@ -367,20 +369,25 @@ int main(int argc, char *argv[])
 	}
 
 
-	//DDR init, with RDT if supported (servers)
-	int ret_val = rdt_mbm_support_check();
+	//Initialize DDR PMU
+	if (pmu_ddr_init(&ddr) == DDR_NONE) {
+		//lets try RDT instread
 
-	if (!ret_val) {
-		logi(TAG, "RDT MBM supported\n");
-		ret_val = rdt_mbm_init();
-		if (ret_val) {
-			loge(TAG, "Error in initializing RDT MBM\n");
-			return ret_val;
+		//DDR init, with RDT if supported (servers)
+		int ret_val = rdt_mbm_support_check();
+
+		if (!ret_val) {
+			logi(TAG, "RDT MBM supported\n");
+			ret_val = rdt_mbm_init();
+			if (ret_val) {
+				loge(TAG, "Error in initializing RDT MBM\n");
+				return ret_val;
+			}
+			rdt_enabled = 1;
+		} else {
+			loge(TAG, "Neither DDR nor RDT support was found\n");
+			return -1;
 		}
-		rdt_enabled = 1;
-	} else {
-		logi(TAG, "RDT MBM not supported\n");
-		pmu_ddr_init(&ddr);
 	}
 
 	//Algorithm init

@@ -66,6 +66,9 @@ int pmu_ddr_init(struct ddr_s *ddr)
 	struct pci_dev *dev;
 	uint64_t ddr_bar = 0;
 
+	ddr_interface_type = DDR_NONE;
+
+
 	dev = pcie_get_devices();
 
 	while(dev != NULL) {
@@ -77,7 +80,9 @@ int pmu_ddr_init(struct ddr_s *ddr)
 
 		if(dev->vendor_id == 0x8086) {
 			switch(dev->device_id) {
-				case 0x7d05: //client DDR controller
+				//client DDR controller
+				case 0xa700: //RPL
+				case 0x7d05: //MTL
 					ddr_bar = pci_read_long(dev, 0x48) & 0xfffffff0; //get base address
 					logv(TAG, "PCIe %x: DDR BAR: %x\n",dev->device_id, ddr_bar);
 					ddr_interface_type = DDR_CLIENT;
@@ -130,14 +135,14 @@ static uint64_t pmu_ddr_client(struct ddr_s *ddr, int type)
 
 	addr = ddr->mmap[1] + DDR_WR_BW;
 	ddr->wr_last_update[1] = *((uint64_t*)addr);
-	
+
 	//what should we return? RD or WR?
 	if(type == DDR_RD_BW) {
 		total = ddr->rd_last_update[0] - oldvalue_rd[0];
 		total += ddr->rd_last_update[1] - oldvalue_rd[1];
 	} else {
 		total = ddr->wr_last_update[0] - oldvalue_wr[0];
-		total += ddr->wr_last_update[1] - oldvalue_wr[1];	
+		total += ddr->wr_last_update[1] - oldvalue_wr[1];
 	}
 
 	return total * 64; //Count CAS, so multiply by 64 to get Bytes

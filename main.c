@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <sys/mman.h>
+#include <sys/sysinfo.h>
 
 #include "common.h"
 #include "primitive.h"
@@ -50,6 +51,8 @@ volatile int syncflag = 0;
 volatile int ddrbwflag = 0;
 volatile int msr_file_id[MAX_NUM_CORES];
 
+int core_priority[MAX_THREADS]; // Array to store the priority values
+
 struct ddr_s ddr;
 
 void sigintHandler(int sig_num)
@@ -57,7 +60,8 @@ void sigintHandler(int sig_num)
 	//rework this to wake up the other threads and clean them up in a nice way
 	loga(TAG, "sig %d, terminating dPF... hold on\n", sig_num);
 
-	if (tunealg == MAB && (mstate.dynamic_sd == ON || mstate.dynamic_sd == STEP)) {
+	if (tunealg == MAB && (mstate.dynamic_sd == ON ||
+		mstate.dynamic_sd == STEP)) {
 		free(mstate.ipc_buffer);
 		free(mstate.sd_buffer);
 		mstate.ipc_buffer = NULL;
@@ -97,7 +101,8 @@ static void *thread_start(void *arg)
 	struct thread_state *tstate = arg;
 	int msr_file;
 	uint64_t pmu_old[PMU_COUNTERS], pmu_new[PMU_COUNTERS];
-	uint64_t instructions_old = 0, instructions_new = 0, cpu_cycles_old = 0, cpu_cycles_new = 0;
+	uint64_t instructions_old = 0, instructions_new = 0,
+		cpu_cycles_old = 0, cpu_cycles_new = 0;
 
 	logd(TAG, "Thread running on core %d, this is #%d core in the module\n", tstate->core_id, CORE_IN_MODULE);
 
@@ -159,7 +164,8 @@ static void *thread_start(void *arg)
 			cpu_cycles_old = cpu_cycles_new;
 		}
 
-		pmu_core_read(msr_file, pmu_new, &instructions_new, &cpu_cycles_new);
+		pmu_core_read(msr_file, pmu_new, &instructions_new, &
+			cpu_cycles_new);
 
 
 			if (tunealg != MAB) {
@@ -210,7 +216,7 @@ static void *thread_start(void *arg)
 	return 0;
 }
 
-void print_usage()
+void print_usage(void)
 {
 	printf("\n*** System settings:\n");
 	printf("Default is to auto-detect Atom E-cores and both Hybrid Clients and E-core servers are supported.\n");
@@ -226,6 +232,14 @@ void print_usage()
 	printf("   Note that this gives a short but high load on the memory subsystem.\n");
 	printf(" -D --ddrbw-set - set DDR bandwidth target in MB/s. This should be the max achievable.\n");
 	printf("   --ddrbw-set 46000\n");
+	printf("The -w or --weight argument can be used to set the priority level of each core.\n");
+	printf(" -w --weight - set core priorities by providing a comma-separated list of integers.\n");
+	printf("   Core priority determines the importance of each core's workload. A higher value means\n");
+	printf("   the core is given more CPU time relative to lower-priority cores. Valid values range from\n");
+	printf("   0 to 99, where 99 is the highest priority and 0 is the lowest.\n");
+	printf("   The number of values should match the number of active cores. If fewer values are provided,\n");
+	printf("   the remaining cores will default to a priority of 50.\n");
+	printf("   --weight 55,43,99,80\n");
 
 	printf("\n*** Algorithm tuning:\n");
 	printf(" -i --intervall - update interval in seconds (1-60), default: 1\n");
@@ -241,9 +255,64 @@ void print_usage()
 	printf(" -h --help - lists these arguments\n");
 }
 
+
+// parse_weights - Parses and validates core priorities from a comma-separated 
+// string. Sets priorities for each core, using default for any missing entries.
+// @weights_args: Comma-separated core priorities. Returns 0 on success, or -1 
+// for invalid input (non-integer or out-of-range values).
+int parse_weights(char *weights_args)
+{
+	char *token, *endptr;
+	int core_count = 0;
+	
+	token = strtok(weights_args, ",");
+
+	while (token != NULL) {
+		if (core_count == ACTIVE_THREADS)
+			break;
+
+		int priority = strtol(token, &endptr, 10);
+
+		if (*endptr != '\0') {
+			loge(TAG, "Invalid input '%s', not a number\n",
+				token);
+			return -1;
+		}
+
+		if (priority < MIN_PRIORITY || priority > MAX_PRIORITY) {
+			loge(TAG, "Priority %d is out of range (%d-%d)\n", 
+				priority, MIN_PRIORITY, MAX_PRIORITY);
+			return -1;
+		}
+		
+		// Assign the valid priority to the current core
+		core_priority[core_count] = priority;
+		core_count++;
+		token = strtok(NULL, ",");
+	}
+
+	// If core_count is less than total cores,
+	// then set the other cores to 50
+	while (core_count < ACTIVE_THREADS) {
+		core_priority[core_count] = DEFAULT_PRIORITY;
+		core_count++;
+	}
+
+	logd(TAG, "Core Priorities:\n");
+	for (int i = 0; i < core_count; i++)
+		logd(TAG, "Core %d Priority: %d\n", i, core_priority[i]);
+
+	return 0;
+}
+
+
 int main(int argc, char *argv[])
 {
+	char weight_string[MAX_WEIGHT_STR_LEN];
 	float ddr_bw_auto_utilization = 0.7;
+
+	for (int i = 0; i < MAX_THREADS; i++)
+		core_priority[i] = MIN_PRIORITY;
 
 	log_setlevel(3);
 	loga(TAG, "This is the main file for the UU Hardware Prefetch and Control project\n");
@@ -261,12 +330,13 @@ int main(int argc, char *argv[])
 			{"alg",		required_argument,	0, 'A'},
 			{"aggr",	required_argument,	0, 'a'},
 			{"log",		required_argument,	0, 'l'},
+			{"weight",	required_argument,	0, 'w'},
 			{"help",	no_argument,		0, 'h'},
 			{NULL,		no_argument,		0, 0},
 		};
 
 		int option_index = 0;
-		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:h",
+		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:h",
 			long_options, &option_index);
 		// end of options
 		if (c == -1)
@@ -281,10 +351,12 @@ int main(int argc, char *argv[])
 				core_last = strtol(strstr(optarg, "-")
 					+ 1, 0, 10);
 
-			logi(TAG, "Cores: %d -> %d = %d threads\n", core_first, core_last, core_last - core_first + 1);
+			logi(TAG, "Cores: %d -> %d = %d threads\n", core_first,
+				core_last, core_last - core_first + 1);
 
 			if (core_last - core_first > MAX_THREADS) {
-				loge(TAG, "Too many cores, max is %d\n", MAX_THREADS);
+				loge(TAG, "Too many cores, max is %d\n",
+					MAX_THREADS);
 				return -1;
 			}
 		break;
@@ -323,13 +395,18 @@ int main(int argc, char *argv[])
 			log_setlevel(strtol(optarg, 0, 10));
 		break;
 
+		case 'w': //weight
+			strncpy(weight_string, optarg, MAX_WEIGHT_STR_LEN);
+		break;
+
 		case '?': //getopt returns unknown argument
 		case 'h': //help
 			print_usage();
 			return 0;
 		break;
 		default:
-			loge(TAG, "Error, strange command-line argument %d\n", c);
+			loge(TAG, "Error, strange command-line argument %d\n",
+				c);
 			return -1;
 		}
 	}
@@ -337,7 +414,8 @@ int main(int argc, char *argv[])
 
 	//--core has not been used, so let's autodetect
 	if (core_first == -1 || core_last == -1) {
-		//auto-detect Atom E-cores and set first/last core to max E-cores
+		//auto-detect Atom E-cores and set first/last core to max
+		// E-cores
 		struct e_cores_layout_s e_cores;
 
 		e_cores = get_efficient_core_ids();
@@ -350,6 +428,18 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 	}
+
+	// If weight was provided, parse the values into array
+	// core_priority[MAX_THREADS]
+	if (strlen(weight_string) != 0) {
+		if (parse_weights(weight_string) < 0)
+			return -1;
+	} else {
+		for (int i = 0; i < ACTIVE_THREADS; i++)
+			core_priority[i] = DEFAULT_PRIORITY;
+	}
+
+
 
 	//--ddrbw-set / ddrbw-test has not been used, so use ddrbw-auto
 	if (ddr_bw_target == DDR_BW_NOT_SET) {

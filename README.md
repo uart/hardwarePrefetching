@@ -27,6 +27,14 @@ DDR Bandwith is by default auto-detected based on DMI/BIOS information and targe
 `-D --ddrbw-set` - set DDR bandwidth target in MB/s. This should be the max achievable, typically 70% of theorethical bandwidth.  
 `--ddrbw-set 46000`
 
+**Core Priorities:**  
+You can manually set the priority of each core by providing a comma-separated list of integers. Each integer represents the priority level for a core, with valid values ranging from 0 to 99.
+`-w --weight` - Set core priorities manually. The number of priorities provided can be fewer than the number of active threads. If fewer values are provided, the remaining cores will default to a priority of 50.
+For example:
+`--weight 10,20,30,40`
+In this case, the first four cores will be assigned the specified priorities (10, 20, 30, 40), and the rest will default to 50.
+Invalid input will result in an error if a priority is out of range (0 to 99) or not a valid number.
+
 **Algorithm tuning:**  
 `-i --intervall` - update interval in seconds (1-60), default: 1  
 `--intervall 2`  

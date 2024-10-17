@@ -11,6 +11,10 @@
 #include "log.h"
 
 #define MAX_THREADS (1024)
+#define DEFAULT_PRIORITY (50)
+#define MIN_PRIORITY (0)
+#define MAX_PRIORITY (99)
+#define MAX_WEIGHT_STR_LEN (MAX_THREADS * 3)
 
 #define CORE_IN_MODULE ((tstate->core_id - core_first) % 4)
 #define ACTIVE_THREADS (core_last - core_first + 1)

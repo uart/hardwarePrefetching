@@ -23,6 +23,7 @@
 #include "msr.h"
 #include "log.h"
 #include "sysdetect.h"
+#include "pcie.h"
 
 #define TAG "MAIN"
 
@@ -43,7 +44,6 @@ int core_last = -1;
 float aggr = 1.0; //retuning aggressiveness
 int tunealg = 0;
 uint32_t rdt_enabled = 0;
-
 
 //global runtime
 volatile int quitflag = 0;
@@ -305,7 +305,6 @@ int parse_weights(char *weights_args)
 	return 0;
 }
 
-
 int main(int argc, char *argv[])
 {
 	char weight_string[MAX_WEIGHT_STR_LEN];
@@ -318,6 +317,9 @@ int main(int argc, char *argv[])
 	loga(TAG, "This is the main file for the UU Hardware Prefetch and Control project\n");
 
 	signal(SIGINT, sigintHandler);
+
+
+	pcie_init();
 
 	//decode command-line
 	while (1) {
@@ -454,20 +456,25 @@ int main(int argc, char *argv[])
 	}
 
 
-	//DDR init, with RDT if supported (servers)
-	int ret_val = rdt_mbm_support_check();
+	//Initialize DDR PMU
+	if (pmu_ddr_init(&ddr) == DDR_NONE) {
+		//lets try RDT instread
 
-	if (!ret_val) {
-		logi(TAG, "RDT MBM supported\n");
-		ret_val = rdt_mbm_init();
-		if (ret_val) {
-			loge(TAG, "Error in initializing RDT MBM\n");
-			return ret_val;
+		//DDR init, with RDT if supported (servers)
+		int ret_val = rdt_mbm_support_check();
+
+		if (!ret_val) {
+			logi(TAG, "RDT MBM supported\n");
+			ret_val = rdt_mbm_init();
+			if (ret_val) {
+				loge(TAG, "Error in initializing RDT MBM\n");
+				return ret_val;
+			}
+			rdt_enabled = 1;
+		} else {
+			loge(TAG, "Neither DDR nor RDT support was found\n");
+			return -1;
 		}
-		rdt_enabled = 1;
-	} else {
-		logi(TAG, "RDT MBM not supported\n");
-		pmu_ddr_init(&ddr);
 	}
 
 	//Algorithm init
@@ -491,6 +498,7 @@ int main(int argc, char *argv[])
 	close(ddr.mem_file);
 
 	rdt_mbm_reset();
+	pcie_deinit();
 	loga(TAG, "dpf finished\n");
 
 	return 0;

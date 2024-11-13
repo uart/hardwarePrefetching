@@ -131,12 +131,18 @@ int pmu_ddr_init(struct ddr_s *ddr)
 
 				mmio_base = pci_read_long(dev, 0xD0);
 				scf_bar = pci_read_long(dev, 0xD4);
-				ddr_bar = 0xF6000000;
+
+				mmio_base = mmio_base & 0x1FFFFFF;
+				mmio_base = mmio_base << 23;
+
+				scf_bar = scf_bar & 0x7FF;
+				scf_bar = scf_bar << 12;
+
+				ddr_bar = mmio_base | scf_bar;
 				ddr_interface_type = DDR_GRANDRIDGE;
 
-				logd(TAG, "MMIO BASE: %lx\n",
-					mmio_base);
-				logd(TAG, "SCF BAR: %lx\n", scf_bar);
+				logd(TAG, "MMIO BASE: 0X%X SCF BAR: 0X%X Result: 0X%X\n",
+				mmio_base, scf_bar, ddr_bar);
 			break;
 
 			default:

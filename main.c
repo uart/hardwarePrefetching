@@ -307,7 +307,7 @@ int parse_weights(char *weights_args)
 
 int main(int argc, char *argv[])
 {
-	char weight_string[MAX_WEIGHT_STR_LEN];
+	char weight_string[MAX_WEIGHT_STR_LEN] = {0};
 	float ddr_bw_auto_utilization = 0.7;
 
 	for (int i = 0; i < MAX_THREADS; i++)

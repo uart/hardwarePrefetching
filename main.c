@@ -398,7 +398,8 @@ int main(int argc, char *argv[])
 		break;
 
 		case 'w': //weight
-			strncpy(weight_string, optarg, MAX_WEIGHT_STR_LEN);
+			strncpy(weight_string, optarg, MAX_WEIGHT_STR_LEN - 1);
+			weight_string[MAX_WEIGHT_STR_LEN - 1] = '\0';
 		break;
 
 		case '?': //getopt returns unknown argument

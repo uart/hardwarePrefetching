@@ -32,9 +32,9 @@
 
 
 struct ddr_s {
-	uint64_t rd_last_update[16];
-	uint64_t wr_last_update[16];
-	char *mmap[16]; //ddr ch 0, 1, ...
+	uint64_t rd_last_update[MAX_NUM_DDR_CONTROLLERS];
+	uint64_t wr_last_update[MAX_NUM_DDR_CONTROLLERS];
+	char *mmap[MAX_NUM_DDR_CONTROLLERS]; //ddr ch 0, 1, ...
 	int mem_file; //file desc
 };
 

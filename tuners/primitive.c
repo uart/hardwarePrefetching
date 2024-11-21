@@ -36,7 +36,7 @@ int basicalg(int tunealg)
 	//
 
 	if (!rdt_enabled)
-		ddr_rd_bw = pmu_ddr(&ddr, DDR_RD_BW);
+		ddr_rd_bw = pmu_ddr(&ddr, DDR_PMU_RD);
 	else
 		ddr_rd_bw = rdt_mbm_bw_get();
 

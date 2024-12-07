@@ -6,34 +6,35 @@
 
 #define DDR_NONE (-1)
 #define DDR_CLIENT (1)
-#define DDR_SERVER (2)
-#define DDR_GRANDRIDGE (3)
+#define DDR_GRR_SRF (2)
 
-
+#define DDR_PMU_RD (1)
+#define DDR_PMU_WR (2)
 //IMC - the Intel DDR controller, client version on Alder/Raptor-lake i9
 
 //DDR Controller offset
 #define CLIENT_DDR0_OFFSET (0x00000)
 #define CLIENT_DDR1_OFFSET (0x10000)
+#define GRR_SRF_MC_ADDRESS(n) (0x24C000 + (0x4000 * (n)))
 
 #define CLIENT_DDR_RANGE (0x10000)
+#define GRR_SRF_DDR_RANGE (0x10000)
 
 //register offsets
-#define DDR_RD_BW (0xd858)
-#define DDR_WR_BW (0xd8a0)
+#define CLIENT_DDR_RD_BW (0xd858)
+#define CLIENT_DDR_WR_BW (0xd8a0)
 
-#define GRANDRIDGE_MC0_BASE (0x24C000)
-#define GRANDRIDGE_MC1_BASE (0x250000)
+#define GRR_SRF_FREE_RUN_CNTR_READ (0x1A40)
+#define GRR_SRF_FREE_RUN_CNTR_WRITE (0x1A48)
 
-#define GRANDRIDGE_FREE_RUN_CNTR_READ (0x1A40)
-#define GRANDRIDGE_FREE_RUN_CNTR_WRITE (0x1A48)
-
+#define MAX_NUM_DDR_CONTROLLERS (16)
 
 
-struct ddr_s{
-	uint64_t rd_last_update[16];
-	uint64_t wr_last_update[16];
-	char *mmap[16]; //ddr ch 0, 1, ...
+
+struct ddr_s {
+	uint64_t rd_last_update[MAX_NUM_DDR_CONTROLLERS];
+	uint64_t wr_last_update[MAX_NUM_DDR_CONTROLLERS];
+	char *mmap[MAX_NUM_DDR_CONTROLLERS]; //ddr ch 0, 1, ...
 	int mem_file; //file desc
 };
 

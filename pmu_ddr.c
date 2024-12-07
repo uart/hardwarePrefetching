@@ -21,10 +21,12 @@
 #define TAG "PMU_DDR"
 
 static int ddr_interface_type;
+int num_ddr_controllers;
 
-//Initialize DDR for a grandridge CPU
+
+//Initialize DDR for a Sierra Forest or Grandridge CPU
 //ddr_bar is the base address of the DDR config space
-static int pmu_ddr_init_grandridge(struct ddr_s *ddr, uint64_t ddr_bar)
+static int pmu_ddr_init_grr_srf(struct ddr_s *ddr, uint64_t ddr_bar)
 {
 	int mem_file;
 
@@ -37,23 +39,19 @@ static int pmu_ddr_init_grandridge(struct ddr_s *ddr, uint64_t ddr_bar)
 
 	ddr->mem_file = mem_file;
 
-	ddr->mmap[0] = (char *)mmap(NULL, CLIENT_DDR_RANGE, PROT_READ,
-		MAP_SHARED, mem_file, ddr_bar + GRANDRIDGE_MC0_BASE);
-	if (ddr->mmap[0] == MAP_FAILED) {
-		loge(TAG, "Could not mmap() Grand Ridge MC0 area\n");
-		return -1;
+	for (int i = 0; i < num_ddr_controllers; i++) {
+		ddr->mmap[i] = (char *)mmap(NULL, GRR_SRF_DDR_RANGE, PROT_READ,
+			MAP_SHARED, mem_file, ddr_bar
+			+ GRR_SRF_MC_ADDRESS(i));
+
+		if (ddr->mmap[i] == MAP_FAILED) {
+			loge(TAG, "Could not mmap() DDR controller %d\n", i);
+			return -1;
+		}
 	}
 
-	ddr->mmap[1] = (char *)mmap(NULL, CLIENT_DDR_RANGE, PROT_READ,
-		MAP_SHARED, mem_file, ddr_bar + GRANDRIDGE_MC1_BASE);
-	if (ddr->mmap[1] == MAP_FAILED) {
-		loge(TAG, "Could not mmap() Grand Ridge MC1 area\n");
-		return -1;
-	}
-
-
-	pmu_ddr(ddr, DDR_RD_BW);
-	pmu_ddr(ddr, DDR_WR_BW);
+	pmu_ddr(ddr, DDR_PMU_RD);
+	pmu_ddr(ddr, DDR_PMU_WR);
 
 	return 0;
 }
@@ -89,8 +87,8 @@ static int pmu_ddr_init_client(struct ddr_s *ddr, uint64_t ddr_bar)
 	}
 
 
-	pmu_ddr(ddr, DDR_RD_BW); //first read can be spiky, clean it
-	pmu_ddr(ddr, DDR_WR_BW); //let's do another clean just to be safe
+	pmu_ddr(ddr, DDR_PMU_RD); //first read can be spiky, clean it
+	pmu_ddr(ddr, DDR_PMU_WR); //let's do another clean just to be safe
 
 	return 0;
 }
@@ -104,7 +102,6 @@ int pmu_ddr_init(struct ddr_s *ddr)
 	uint64_t ddr_bar = 0;
 
 	ddr_interface_type = DDR_NONE;
-
 
 	dev = pcie_get_devices();
 
@@ -126,7 +123,8 @@ int pmu_ddr_init(struct ddr_s *ddr)
 					dev->device_id, ddr_bar);
 				ddr_interface_type = DDR_CLIENT;
 			break;
-			case 0x3251:
+			// GRR SRF DDR controller
+			case 0x3251: // Server platforms config / UBOX
 				uint64_t mmio_base, scf_bar;
 
 				mmio_base = pci_read_long(dev, 0xD0);
@@ -139,10 +137,13 @@ int pmu_ddr_init(struct ddr_s *ddr)
 				scf_bar = scf_bar << 12;
 
 				ddr_bar = mmio_base | scf_bar;
-				ddr_interface_type = DDR_GRANDRIDGE;
+				ddr_interface_type = DDR_GRR_SRF;
 
 				logd(TAG, "MMIO BASE: 0X%X SCF BAR: 0X%X Result: 0X%X\n",
 				mmio_base, scf_bar, ddr_bar);
+			break;
+			case 0x324a: // DDR controller
+				num_ddr_controllers++;
 			break;
 
 			default:
@@ -158,8 +159,8 @@ int pmu_ddr_init(struct ddr_s *ddr)
 
 		if (ret < 0)
 			ddr_interface_type = DDR_NONE;
-	} else if (ddr_interface_type == DDR_GRANDRIDGE) {
-		int ret = pmu_ddr_init_grandridge(ddr, ddr_bar);
+	} else if (ddr_interface_type == DDR_GRR_SRF) {
+		int ret = pmu_ddr_init_grr_srf(ddr, ddr_bar);
 
 		if (ret < 0)
 			ddr_interface_type = DDR_NONE;
@@ -171,7 +172,7 @@ int pmu_ddr_init(struct ddr_s *ddr)
 
 //DDR read functionality for Client CPUs
 //Currently limited to two DDR controllers
-//type is either DDR_RD_BW or DDR_WR_BW. The ddr_s struct is updated with both
+//type is either CLIENT_DDR_RD_BW or CLIENT_DDR_WR_BW. The ddr_s struct is updated with both
 //read and write counters but only the type is returned by the function.
 static uint64_t pmu_ddr_client(struct ddr_s *ddr, int type)
 {
@@ -186,20 +187,20 @@ static uint64_t pmu_ddr_client(struct ddr_s *ddr, int type)
 	oldvalue_wr[0] = ddr->wr_last_update[0];
 	oldvalue_wr[1] = ddr->wr_last_update[1];
 
-	addr = ddr->mmap[0] + DDR_RD_BW;
+	addr = ddr->mmap[0] + CLIENT_DDR_RD_BW;
 	ddr->rd_last_update[0] = *((uint64_t *)addr);
 
-	addr = ddr->mmap[0] + DDR_WR_BW;
+	addr = ddr->mmap[0] + CLIENT_DDR_WR_BW;
 	ddr->wr_last_update[0] = *((uint64_t *)addr);
 
-	addr = ddr->mmap[1] + DDR_RD_BW;
+	addr = ddr->mmap[1] + CLIENT_DDR_RD_BW;
 	ddr->rd_last_update[1] = *((uint64_t *)addr);
 
-	addr = ddr->mmap[1] + DDR_WR_BW;
+	addr = ddr->mmap[1] + CLIENT_DDR_WR_BW;
 	ddr->wr_last_update[1] = *((uint64_t *)addr);
 
 	//what should we return? RD or WR?
-	if (type == DDR_RD_BW) {
+	if (type == DDR_PMU_RD) {
 		total = ddr->rd_last_update[0] - oldvalue_rd[0];
 		total += ddr->rd_last_update[1] - oldvalue_rd[1];
 	} else {
@@ -211,56 +212,46 @@ static uint64_t pmu_ddr_client(struct ddr_s *ddr, int type)
 }
 
 
-// DDR read functionality for Grandridge CPUs
+// DDR read functionality for Sierra Forest and Grandridge CPUs
 //The ddr_s struct is updated with both
 //read and write counters but only the type is returned by the function.
-static uint64_t pmu_ddr_grandridge(struct ddr_s *ddr, int type)
+static uint64_t pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 {
-	uint64_t total;
-	uint64_t oldvalue_rd[2];
-	uint64_t oldvalue_wr[2];
+	uint64_t total = 0;
+	uint64_t oldvalue_rd[MAX_NUM_DDR_CONTROLLERS];
+	uint64_t oldvalue_wr[MAX_NUM_DDR_CONTROLLERS];
 	char *addr;
 
 	// Store old values for calculations
-	oldvalue_rd[0] = ddr->rd_last_update[0];
-	oldvalue_rd[1] = ddr->rd_last_update[1];
-	oldvalue_wr[0] = ddr->wr_last_update[0];
-	oldvalue_wr[1] = ddr->wr_last_update[1];
+	for (int i = 0; i < num_ddr_controllers; i++) {
+		oldvalue_rd[i] = ddr->rd_last_update[i];
+		oldvalue_wr[i] = ddr->wr_last_update[i];
 
-	// Read from DDR0
-	addr = ddr->mmap[0] + GRANDRIDGE_FREE_RUN_CNTR_READ;
-	ddr->rd_last_update[0] = *((uint64_t *)addr);
+		// Read from counters
+		addr = ddr->mmap[i] + GRR_SRF_FREE_RUN_CNTR_READ;
+		ddr->rd_last_update[i] = *((uint64_t *)addr);
 
-	addr = ddr->mmap[0] + GRANDRIDGE_FREE_RUN_CNTR_WRITE;
-	ddr->wr_last_update[0] = *((uint64_t *)addr);
+		addr = ddr->mmap[i] + GRR_SRF_FREE_RUN_CNTR_WRITE;
+		ddr->rd_last_update[i] = *((uint64_t *)addr);
 
-	// Read from DDR1
-	addr = ddr->mmap[1] + GRANDRIDGE_FREE_RUN_CNTR_READ;
-	ddr->rd_last_update[1] = *((uint64_t *)addr);
-
-	addr = ddr->mmap[1] + GRANDRIDGE_FREE_RUN_CNTR_WRITE;
-	ddr->wr_last_update[1] = *((uint64_t *)addr);
-
-	if (type == DDR_RD_BW) {
-		total = ddr->rd_last_update[0] - oldvalue_rd[0];
-		total += ddr->rd_last_update[1] - oldvalue_rd[1];
-	} else {
-		total = ddr->wr_last_update[0] - oldvalue_wr[0];
-		total += ddr->wr_last_update[1] - oldvalue_wr[1];
+		if (type == DDR_PMU_RD)
+			total += ddr->rd_last_update[i] - oldvalue_rd[i];
+		else
+			total += ddr->wr_last_update[i] - oldvalue_wr[i];
 	}
 
 	return total * 64;
 }
 
 //Reads current DDR counter values in bytes from the boot / initialization
-//type: DDR_RD_BW or DDR_WR_BW
+//type: CLIENT_DDR_RD_BW or CLIENT_DDR_WR_BW
 //returns current counter value for either RD or WR, -1 if error
 uint64_t pmu_ddr(struct ddr_s *ddr, int type)
 {
 	if (ddr_interface_type == DDR_CLIENT)
 		return pmu_ddr_client(ddr, type);
-	else if (ddr_interface_type == DDR_GRANDRIDGE)
-		return pmu_ddr_grandridge(ddr, type);
+	else if (ddr_interface_type == DDR_GRR_SRF)
+		return pmu_ddr_grr_srf(ddr, type);
 
 	return -1;
 }

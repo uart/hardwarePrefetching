@@ -34,16 +34,21 @@
 #define DDR_BW_NOT_SET (-1)
 #define DDR_BW_AUTOTEST (-2)
 
-struct thread_state gtinfo[MAX_THREADS]; //global thread state
+struct thread_state gtinfo[MAX_THREADS]; // global thread state
+static struct perf_event_attr event_attrs[MAX_EVENTS];
+
 
 //init variables
-int ddr_bw_target = DDR_BW_NOT_SET; //MB/s (yes, bytes). Max _achievable_ bandwidth
+int ddr_bw_target = DDR_BW_NOT_SET; //MB/s (yes, bytes). Max _achievable_
+// bandwidth
 float time_intervall = 1.0; //one second by default
 int core_first = -1;
 int core_last = -1;
 float aggr = 1.0; //retuning aggressiveness
 int tunealg = 0;
 uint32_t rdt_enabled = 0;
+int num_events;
+int pmu_method = PMU_RAW;
 
 //global runtime
 volatile int quitflag = 0;
@@ -100,9 +105,11 @@ static void *thread_start(void *arg)
 {
 	struct thread_state *tstate = arg;
 	int msr_file;
-	uint64_t pmu_old[PMU_COUNTERS], pmu_new[PMU_COUNTERS];
-	uint64_t instructions_old = 0, instructions_new = 0,
-		cpu_cycles_old = 0, cpu_cycles_new = 0;
+	uint64_t pmu_new[MAX_EVENTS] = {0};
+	uint64_t pmu_old[MAX_EVENTS] = {0};
+	uint64_t instructions_new = 0, instructions_old = 0;
+	uint64_t cpu_cycles_new = 0, cpu_cycles_old = 0;
+	int event_fds[MAX_EVENTS];
 
 	logd(TAG, "Thread running on core %d, this is #%d core in the module\n", tstate->core_id, CORE_IN_MODULE);
 
@@ -149,7 +156,13 @@ static void *thread_start(void *arg)
 	msr_hwpf_write(msr_file, tstate->hwpf_msr_value);
 
 	msr_enable_fixed(msr_file);
-	pmu_core_config(msr_file);
+
+	// Initialize based on PMU method
+	if (pmu_method == PMU_RAW) {
+		pmu_core_config(msr_file);
+	} else if (pmu_method == PMU_PERF) {
+		perf_init(event_attrs, event_fds, num_events, tstate->core_id);
+	}
 
 	// Run until end of world...
 	while (quitflag == 0) {
@@ -164,22 +177,29 @@ static void *thread_start(void *arg)
 			cpu_cycles_old = cpu_cycles_new;
 		}
 
-		pmu_core_read(msr_file, pmu_new, &instructions_new, &
-			cpu_cycles_new);
+		// Read PMU counters based on method
+		if (pmu_method == PMU_RAW) {
+			pmu_core_read(msr_file, pmu_new, &instructions_new, &cpu_cycles_new);
+		} else if (pmu_method == PMU_PERF) {
+			perf_read(event_fds, pmu_new, num_events);
+			// Extract instructions and cycles like PMU_RAW
+			instructions_new =
+			    pmu_new[PERF_INDEX_EVENT_INSTRUCTIONS];
+			cpu_cycles_new = pmu_new[PERF_INDEX_EVENT_CYCLES];
+		}
 
+		if (tunealg != MAB) {
+			for (int i = 0; i < PMU_COUNTERS; i++)
+				tstate->pmu_result[i] =
+				    pmu_new[i] - pmu_old[i];
+		} else {
+			tstate->instructions_retired =
+			    instructions_new - instructions_old;
+			tstate->cpu_cycles =
+			    cpu_cycles_new - cpu_cycles_old;
+		}
 
-			if (tunealg != MAB) {
-				for (int i = 0; i < PMU_COUNTERS; i++)
-					tstate->pmu_result[i] =
-						pmu_new[i] - pmu_old[i];
-			} else {
-				tstate->instructions_retired =
-				instructions_new - instructions_old;
-				tstate->cpu_cycles =
-					cpu_cycles_new - cpu_cycles_old;
-			}
-
-		atomic_fetch_add(&syncflag, 1); //sync by increasing syncflag
+		atomic_fetch_add(&syncflag, 1); // sync by increasing syncflag
 
 		//select out the master core
 		if (tstate->core_id == core_first) {
@@ -210,43 +230,67 @@ static void *thread_start(void *arg)
 		}
 	}
 
+        // Before pthread_exit or return
+	if (pmu_method == PMU_PERF) {
+		perf_deinit(event_fds, num_events);
+	}
 	close(msr_file);
 	logi(TAG, "Thread on core %d done\n", tstate->core_id);
 
 	return 0;
 }
 
-void print_usage(void)
+void print_usage(void) 
 {
 	printf("\n*** System settings:\n");
-	printf("Default is to auto-detect Atom E-cores and both Hybrid Clients and E-core servers are supported.\n");
-	printf("The --core argument can be used to direct dPF on only a specific set of cores.\n");
-	printf(" -c --core - set cores to use dPF. Starting from core id 0, e.g. 8-15 for the 9th to 16th core.\n");
+	printf("Default is to auto-detect Atom E-cores and both Hybrid Clients "
+	       "and E-core servers are supported.\n");
+	printf("The --core argument can be used to direct dPF on only a "
+	       "specific set of cores.\n");
+	printf(" -c --core - set cores to use dPF. Starting from core id 0, eg."
+	       " 8-15 for the 9th to 16th core.\n");
 	printf("   --core 8-15\n");
-	printf("\nDDR Bandwith is by default auto-detected based on DMI/BIOS information and target is set to 70%% of\n");
-	printf("theorethical max bandwidth which is typically the achivable bandwidth.\n");
-	printf(" -d --ddrbw-auto - set DDR bandwith from DMI/BIOS to a specific percentage of max. Default is 0.70 (70%%).\n");
+	printf("\nDDR Bandwith is by default auto-detected based on DMI/BIOS"
+	       "information and target is set to 70%% of\n");
+	printf("theorethical max bandwidth which is typically the achivable "
+	       "bandwidth.\n");
+	printf(" -d --ddrbw-auto - set DDR bandwith from DMI/BIOS to a specific"
+	       "percentage of max. Default is 0.70 (70%%).\n");
 	printf("   --ddrbw-auto 0.65\n");
-	printf(" -t --ddrbw-test - set DDR bandwidth by performing a quick bandwidth test.\n");
+	printf(" -t --ddrbw-test - set DDR bandwidth by performing a quick "
+	       "bandwidth test.\n");
 	printf("   --ddrbw-test\n");
-	printf("   Note that this gives a short but high load on the memory subsystem.\n");
-	printf(" -D --ddrbw-set - set DDR bandwidth target in MB/s. This should be the max achievable.\n");
+	printf("   Note that this gives a short but high load on the memory "
+	       "subsystem.\n");
+	printf(" -D --ddrbw-set - set DDR bandwidth target in MB/s. This should"
+	       "be the max achievable.\n");
 	printf("   --ddrbw-set 46000\n");
-	printf("The -w or --weight argument can be used to set the priority level of each core.\n");
-	printf(" -w --weight - set core priorities by providing a comma-separated list of integers.\n");
-	printf("   Core priority determines the importance of each core's workload. A higher value means\n");
-	printf("   the core is given more CPU time relative to lower-priority cores. Valid values range from\n");
-	printf("   0 to 99, where 99 is the highest priority and 0 is the lowest.\n");
-	printf("   The number of values should match the number of active cores. If fewer values are provided,\n");
+	printf("The -w or --weight argument can be used to set the priority "
+	       "level of each core.\n");
+	printf(" -w --weight - set core priorities by providing a "
+	       "comma-separated list of integers.\n");
+	printf("   Core priority determines the importance of each core's "
+	       "workload. A higher value means\n");
+	printf("   the core is given more CPU time relative to lower-priority "
+	       "cores. Valid values range from\n");
+	printf("   0 to 99, where 99 is the highest priority and 0 is the "
+	       "lowest.\n");
+	printf("   The number of values should match the number of active "
+	       "cores. If fewer values are provided,\n");
 	printf("   the remaining cores will default to a priority of 50.\n");
 	printf("   --weight 55,43,99,80\n");
 
 	printf("\n*** Algorithm tuning:\n");
-	printf(" -i --intervall - update interval in seconds (1-60), default: 1\n");
+	printf(" -i --intervall - update interval in seconds (1-60), default: "
+	       "1\n");
 	printf("   --intervall 2\n");
 	printf(" -A --alg - set tune algorithm, default 0\n");
 	printf("   --alg 2\n");
-	printf(" -a --aggr - set retune aggressiveness (0.1 - 5.0), default 1.0\n");
+	printf(" -p --perf - use perf events for PMU monitoring (default: "
+	       "raw PMU)\n");
+	printf("  --perf\n");
+	printf(" -a --aggr - set retune aggressiveness (0.1 - 5.0), default 1."
+	       "0\n");
 	printf("   --aggr 2.0\n");
 
 	printf("\n*** Misc:\n");
@@ -254,7 +298,6 @@ void print_usage(void)
 	printf("   --log 3\n");
 	printf(" -h --help - lists these arguments\n");
 }
-
 
 // parse_weights - Parses and validates core priorities from a comma-separated 
 // string. Sets priorities for each core, using default for any missing entries.
@@ -264,7 +307,6 @@ int parse_weights(char *weights_args)
 {
 	char *token, *endptr;
 	int core_count = 0;
-	
 	token = strtok(weights_args, ",");
 
 	while (token != NULL) {
@@ -324,21 +366,22 @@ int main(int argc, char *argv[])
 	//decode command-line
 	while (1) {
 		static struct option long_options[] = {
-			{"core",	required_argument,	0, 'c'},
-			{"ddrbw-auto",	required_argument,	0, 'd'},
-			{"ddrbw-test",	no_argument,		0, 't'},
-			{"ddrbw-set",	required_argument,	0, 'D'},
-			{"intervall",	required_argument,	0, 'i'},
-			{"alg",		required_argument,	0, 'A'},
-			{"aggr",	required_argument,	0, 'a'},
-			{"log",		required_argument,	0, 'l'},
-			{"weight",	required_argument,	0, 'w'},
-			{"help",	no_argument,		0, 'h'},
-			{NULL,		no_argument,		0, 0},
+		    {"core", required_argument, 0, 'c'},
+		    {"ddrbw-auto", required_argument, 0, 'd'},
+		    {"ddrbw-test", no_argument, 0, 't'},
+		    {"ddrbw-set", required_argument, 0, 'D'},
+		    {"intervall", required_argument, 0, 'i'},
+		    {"alg", required_argument, 0, 'A'},
+		    {"aggr", required_argument, 0, 'a'},
+		    {"log", required_argument, 0, 'l'},
+		    {"weight", required_argument, 0, 'w'},
+		    {"perf", no_argument, 0, 'p'},
+		    {"help", no_argument, 0, 'h'},
+		    {NULL, no_argument, 0, 0},
 		};
 
 		int option_index = 0;
-		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:h",
+		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph",
 			long_options, &option_index);
 		// end of options
 		if (c == -1)
@@ -402,6 +445,11 @@ int main(int argc, char *argv[])
 			weight_string[MAX_WEIGHT_STR_LEN - 1] = '\0';
 		break;
 
+		case 'p':
+			pmu_method = PMU_PERF;
+			perf_configure_events(event_attrs, &num_events);
+		break;
+
 		case '?': //getopt returns unknown argument
 		case 'h': //help
 			print_usage();
@@ -426,7 +474,8 @@ int main(int argc, char *argv[])
 		core_last = e_cores.last_efficiency_core;
 
 		if (core_first == -1 || core_last == -1) {
-			loge(TAG, "Error, no cores to run on! Do you have Atom E-cores??\n");
+			loge(TAG, "Error, no cores to run on! Do you have Atom "
+                        "E-cores??\n");
 
 			return -1;
 		}

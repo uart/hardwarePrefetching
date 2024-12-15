@@ -63,7 +63,7 @@ struct ddr_s ddr;
 void sigintHandler(int sig_num)
 {
 	//rework this to wake up the other threads and clean them up in a nice way
-	loga(TAG, "sig %d, terminating dPF... hold on\n", sig_num);
+	loga(TAG, "sig %d, terminating dPF... hold on a second...\n", sig_num);
 
 	if (tunealg == MAB && (mstate.dynamic_sd == ON ||
 		mstate.dynamic_sd == STEP)) {
@@ -77,7 +77,7 @@ void sigintHandler(int sig_num)
 	//sleep(time_intervall * 2);
 	if (rdt_enabled)
 		rdt_mbm_reset();
-	exit(1);
+//	exit(1);
 }
 
 uint64_t time_ms(void)

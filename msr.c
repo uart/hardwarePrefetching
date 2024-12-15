@@ -121,7 +121,8 @@ int msr_corepmu_read(int msr_file, int nr_events, uint64_t *result, uint64_t *in
 			}
 		}
 	}
-	else {
+//	else {  //Should we only read instructions and cycles for MAB tuner?
+
 		// Read fixed counters for IPC calculation
 		if (pread(msr_file, inst_retired, sizeof(uint64_t), MSR_FIXED_CTR0) != sizeof(uint64_t)) {
 			loge(TAG, "Could not read fixed counter for instructions retired\n");
@@ -134,7 +135,7 @@ int msr_corepmu_read(int msr_file, int nr_events, uint64_t *result, uint64_t *in
 		//     loge(TAG, "Could not read fixed counter for CPU cycles\n");
 		//     return -1;
 		// }
-	}
+//	}
 
 	return 0;
 }

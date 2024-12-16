@@ -1,9 +1,10 @@
 #ifndef __ATOM_MSR_H
 #define __ATOM_MSR_H
 
-#include <stdio.h>
+#ifndef __KERNEL__
 #include <stdint.h>
 #include <stdlib.h>
+#endif
 
 #define L2MAXDIST_MAX (31)
 #define L3MAXDIST_MAX (63)

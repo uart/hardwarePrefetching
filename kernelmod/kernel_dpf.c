@@ -1,4 +1,3 @@
-#include <asm/msr.h>
 #include <linux/cpumask.h>
 #include <linux/delay.h>
 #include <linux/init.h>
@@ -12,6 +11,7 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/types.h>
+#include <asm/msr.h>
 
 #define MAX_NUM_CORES (1024)
 #define TIMER_INTERVAL_SEC 1
@@ -50,7 +50,6 @@ static const struct proc_ops proc_fops = {
 static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 {
 	int cpu;
-	// struct dpf_read_info info;
 
 	if (!keep_running)
 		return HRTIMER_NORESTART;
@@ -74,11 +73,11 @@ static int __init dpf_module_init(void)
 
 	proc_buffer = kmalloc(PROC_BUFFER_SIZE, GFP_KERNEL);
 
-	// proc init should be here
 	if (!proc_buffer) {
 		pr_err("Failed to allocate memory for proc_buffer\n");
 		return -ENOMEM;
 	}
+	// proc init should be here
 
 	// Create /proc entry
 	entry = proc_create(PROC_FILE_NAME, 0444, NULL, &proc_fops);

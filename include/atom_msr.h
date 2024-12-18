@@ -96,4 +96,3 @@ union msr_u{
 };
 
 #endif
-

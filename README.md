@@ -3,7 +3,7 @@ Code repository for work on hardware prefetching and controlling hardware prefet
 
 ## Build
 
-Ubuntu: sudo apt install  build-essential libcjson1 libcjson-dev libpci-dev
+Ubuntu: sudo apt install  build-essential libcjson1 libcjson-dev libpci-dev kmod
 
 make
 

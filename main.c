@@ -25,6 +25,8 @@
 #include "sysdetect.h"
 #include "pcie.h"
 
+#include "json_parser.h"
+
 #define TAG "MAIN"
 
 //which core is this in the 4 core module? i.e. 0..3
@@ -287,10 +289,10 @@ void print_usage(void)
 	printf(" -A --alg - set tune algorithm, default 0\n");
 	printf("   --alg 2\n");
 	printf(" -p --perf - use perf events for PMU monitoring (default: "
-	       "raw PMU)\n");
+		"raw PMU)\n");
 	printf("  --perf\n");
 	printf(" -a --aggr - set retune aggressiveness (0.1 - 5.0), default 1."
-	       "0\n");
+		"0\n");
 	printf("   --aggr 2.0\n");
 
 	printf("\n*** Misc:\n");
@@ -307,6 +309,7 @@ int parse_weights(char *weights_args)
 {
 	char *token, *endptr;
 	int core_count = 0;
+
 	token = strtok(weights_args, ",");
 
 	while (token != NULL) {
@@ -322,11 +325,11 @@ int parse_weights(char *weights_args)
 		}
 
 		if (priority < MIN_PRIORITY || priority > MAX_PRIORITY) {
-			loge(TAG, "Priority %d is out of range (%d-%d)\n", 
+			loge(TAG, "Priority %d is out of range (%d-%d)\n",
 				priority, MIN_PRIORITY, MAX_PRIORITY);
 			return -1;
 		}
-		
+
 		// Assign the valid priority to the current core
 		core_priority[core_count] = priority;
 		core_count++;
@@ -349,6 +352,9 @@ int parse_weights(char *weights_args)
 
 int main(int argc, char *argv[])
 {
+	int json_argc = 0;
+	char **json_argv = NULL;
+
 	char weight_string[MAX_WEIGHT_STR_LEN] = {0};
 	float ddr_bw_auto_utilization = 0.7;
 
@@ -362,6 +368,19 @@ int main(int argc, char *argv[])
 
 
 	pcie_init();
+
+	if (argc == 1) {
+		if (json_init(&json_argv) < 0)
+			return -1;
+
+		// Parse the JSON configuration file
+		json_argc = json_parse("config.json", argv, json_argv);
+		if (json_argc < 0) {
+			logi(TAG, "Unable to parse JSON configuration file\n");
+			json_deinit(json_argv);
+			return -1;
+		}
+	}
 
 	//decode command-line
 	while (1) {
@@ -381,8 +400,15 @@ int main(int argc, char *argv[])
 		};
 
 		int option_index = 0;
-		int c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph",
-			long_options, &option_index);
+		int c;
+
+		if (json_argc > 0) {
+			c = getopt_long(json_argc, json_argv, "c:d:tD:i:A:a:l:w:ph", long_options, &option_index);
+		} else {
+			c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph",
+					long_options, &option_index);
+		}
+
 		// end of options
 		if (c == -1)
 			break;
@@ -462,6 +488,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (json_argc > 0)
+		json_deinit(json_argv);
 
 	//--core has not been used, so let's autodetect
 	if (core_first == -1 || core_last == -1) {
@@ -475,7 +503,7 @@ int main(int argc, char *argv[])
 
 		if (core_first == -1 || core_last == -1) {
 			loge(TAG, "Error, no cores to run on! Do you have Atom "
-                        "E-cores??\n");
+			"E-cores??\n");
 
 			return -1;
 		}

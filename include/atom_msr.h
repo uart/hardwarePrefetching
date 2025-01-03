@@ -1,6 +1,10 @@
 #ifndef __ATOM_MSR_H
 #define __ATOM_MSR_H
 
+#ifdef __KERNEL__
+#include <linux/types.h>
+#endif
+
 #ifndef __KERNEL__
 #include <stdint.h>
 #include <stdlib.h>
@@ -92,4 +96,3 @@ union msr_u{
 };
 
 #endif
-

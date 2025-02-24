@@ -20,15 +20,15 @@
 #define PROC_FILE_NAME "dpf_monitor"
 #define PROC_BUFFER_SIZE (1024)
 
-
+//IMPORTANT! MOVE disabled_core INTO THE corestate[] structure!
 static int disabled_core[MAX_NUM_CORES] = {1,1,1,1,1,1,0,0,0,0,0,0,0,0}; //set to 1 for all cores that should be disabled
+
+
 static bool keep_running = true;
 static struct hrtimer monitor_timer;
 static ktime_t kt_period;
 static char *proc_buffer;
 static size_t proc_buffer_size = 0;
-
-volatile int syncflag = 0;
 
 static ssize_t proc_read(struct file *file, char __user *buffer,
 	size_t count, loff_t *pos)
@@ -63,42 +63,27 @@ https://yarchive.net/comp/linux/work_on_cpu.html
 */
 
 	for_each_online_cpu(core_id) {
-		pr_info("for_each_online_cpu(core %d)\n", core_id);
+		pr_info("for_each_online_cpu(core %d)\n", core_id); //REMOVE AFTER DEBUG
 
 		if (disabled_core[core_id] == 0) {
-		pr_info("PMU update, core %d\n", core_id);
-/*
+			pr_info("PMU update, core %d\n", core_id); //REMOVE AFTER DEBUG
+
 			// Read PMU counters based on method
 			pmu_update(core_id);
 
-			__sync_fetch_and_add(&syncflag, 1);
-
 			//select out the master core
 			if(core_id == FIRST_CORE){
-				pr_info("FIRST_CORE, core %d\n", core_id);
-
-//				msleep(1);
-
-				pr_info("FIRST_CORE, continues at sync %d\n", syncflag);
+				pr_info("FIRST_CORE, core %d\n", core_id); //REMOVE AFTER DEBUG
 
 				kernel_basicalg(0);
-				syncflag = 0;
-			} else if (CORE_IN_MODULE == 0) {
-				pr_info("CORE_IN_MODULE, core %d\n", core_id);
-//				msleep(2);
-
-				//only the primary core per module needs to sync,
-				// rest can run free
-//				while (syncflag != 0);
-				//wait for decission to be made by master
 			}
 
-			if (CORE_IN_MODULE == 0 && msr_is_dirty(core_id) == 1){
+			if (CORE_IN_MODULE == 0 && is_msr_dirty(core_id) == 1){
 				//write new MSR settings, only one core in each module is needed
 				msr_update(core_id);
-				pr_info("MSR update on core %d at sync %d\n", core_id, syncflag);
+				pr_info("MSR update on core %d\n", core_id); //REMOVE AFTER DEBUG
 			}
-*/
+
 		} //if disabled
 	} //for each
 

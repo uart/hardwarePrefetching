@@ -2,66 +2,9 @@
 
 #include <linux/timekeeping.h>
 
-#include "../include/atom_msr.h"
+#include "kernel_common.h"
 #include "kernel_primitive.h"
 
-union msr_u pf_msr[MAX_NUM_CORES]; //msr values, 0... --> 0x1320...
-int pf_msr_dirty[MAX_NUM_CORES / 4] = {0}; //0 if no update is needed, 1 if it is
-
-#define PMU_COUNTERS (7)
-uint64_t pmu_result[PMU_COUNTERS]; //delta since last read
-
-
-int ddr_bw_target = 7000000; //quick hack, should be properly set	
-
-
-int inline msr_is_dirty(int core_id)
-{
-	return pf_msr_dirty[core_id / 4];
-}
-
-int msr_load(int core_id)
-{
-	return 0;
-}
-
-int msr_update(int core_id)
-{
-	pf_msr_dirty[core_id / 4] = 0; 
-
-	return 0;
-}
-
-int pmu_update(int core_id)
-{
-	return 0;
-}
-
-// Set value in MSR table
-int msr_set_l2xq(int core_id, int value)
-{
-	pf_msr[core_id].msr1320.L2_STREAM_AMP_XQ_THRESHOLD = value;
-
-	return 0;
-}
-
-int msr_get_l2xq(int core_id)
-{
-	return pf_msr[core_id].msr1320.L2_STREAM_AMP_XQ_THRESHOLD;
-}
-
-// Set value in MSR table
-int msr_set_l3xq(int core_id, int value)
-{
-	pf_msr[core_id].msr1320.LLC_STREAM_XQ_THRESHOLD = value;
-
-	return 0;
-}
-
-int msr_get_l3xq(int core_id)
-{
-	return pf_msr[core_id].msr1320.LLC_STREAM_XQ_THRESHOLD;
-}
 
 //only tunealg 0 is supported at this time
 int kernel_basicalg(int tunealg)
@@ -97,22 +40,22 @@ int kernel_basicalg(int tunealg)
 	int total_ddr_hit = 0;
 
 	for (int i = 0; i < ACTIVE_CORES; i++)
-		total_ddr_hit += pmu_result[3];
+		total_ddr_hit += corestate[i].pmu_result[3];
 
 	for (int i = 0; i < ACTIVE_CORES; i++) {
-		l2_hitr[i] = pmu_result[1] / pmu_result[1]
-			+ pmu_result[2]	+ pmu_result[3];
+		l2_hitr[i] = corestate[i].pmu_result[1] / corestate[i].pmu_result[1]
+			+ corestate[i].pmu_result[2]	+ corestate[i].pmu_result[3];
 
-		l3_hitr[i] = pmu_result[2] / pmu_result[2]
-				+ pmu_result[3];
+		l3_hitr[i] = corestate[i].pmu_result[2] / corestate[i].pmu_result[2]
+				+ corestate[i].pmu_result[3];
 
-		core_contr_to_ddr[i] = pmu_result[3] / total_ddr_hit;
+		core_contr_to_ddr[i] = corestate[i].pmu_result[3] / total_ddr_hit;
 
-		good_pf[i] = pmu_result[4] / pmu_result[1] +
-				pmu_result[2] + pmu_result[3];
+		good_pf[i] = corestate[i].pmu_result[4] / corestate[i].pmu_result[1] +
+				corestate[i].pmu_result[2] + corestate[i].pmu_result[3];
 
 		pr_debug("core %02d PMU delta LD: %10lld  HIT(L2: %d  L3: %d) DDRpressure: %d  GOODPF: %d\n", i, 
-			pmu_result[0], l2_hitr[i], l3_hitr[i], core_contr_to_ddr[i], good_pf[i]);
+			corestate[i].pmu_result[0], l2_hitr[i], l3_hitr[i], core_contr_to_ddr[i], good_pf[i]);
 
 	}
 
@@ -161,7 +104,7 @@ int kernel_basicalg(int tunealg)
 				l2xq = L2XQ_MAX;
 			if (old_l2xq != l2xq) {
 				msr_set_l2xq(i, l2xq);
-				pf_msr_dirty[i / 4] = 1; //only set dirty in first core of module
+				msr_set_dirty(i);
 				if (i == 0)
 					pr_debug("l2xq %d\n", l2xq);
 			}

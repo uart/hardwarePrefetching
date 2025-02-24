@@ -13,6 +13,7 @@
 #include <linux/types.h>
 #include <asm/msr.h>
 
+#include "kernel_common.h"
 #include "kernel_primitive.h"
 
 #define TIMER_INTERVAL_SEC 5
@@ -26,8 +27,6 @@ static struct hrtimer monitor_timer;
 static ktime_t kt_period;
 static char *proc_buffer;
 static size_t proc_buffer_size = 0;
-
-
 
 volatile int syncflag = 0;
 

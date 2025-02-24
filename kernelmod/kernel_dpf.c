@@ -13,20 +13,23 @@
 #include <linux/types.h>
 #include <asm/msr.h>
 
-#define MAX_NUM_CORES (1024)
-#define TIMER_INTERVAL_SEC 1
+#include "kernel_primitive.h"
+
+#define TIMER_INTERVAL_SEC 5
 #define PROC_FILE_NAME "dpf_monitor"
 #define PROC_BUFFER_SIZE (1024)
 
-int kernel_basicalg(int tunealg);
 
-static int active_core[MAX_NUM_CORES] = {0};
+static int disabled_core[MAX_NUM_CORES] = {1,1,1,1,1,1,0,0,0,0,0,0,0,0}; //set to 1 for all cores that should be disabled
 static bool keep_running = true;
 static struct hrtimer monitor_timer;
 static ktime_t kt_period;
 static char *proc_buffer;
 static size_t proc_buffer_size = 0;
 
+
+
+volatile int syncflag = 0;
 
 static ssize_t proc_read(struct file *file, char __user *buffer,
 	size_t count, loff_t *pos)
@@ -49,16 +52,56 @@ static const struct proc_ops proc_fops = {
 
 static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 {
-	int cpu;
+	int core_id;
 
 	if (!keep_running)
 		return HRTIMER_NORESTART;
 
-	for_each_online_cpu(cpu) {
-		if (active_core[cpu] == 0) {
-			kernel_basicalg(0);
-		}
-	}
+/*
+This should be replaced by something faster such as smp_call_function() instead. See this:
+https://yarchive.net/comp/linux/work_on_cpu.html
+
+*/
+
+	for_each_online_cpu(core_id) {
+		pr_info("for_each_online_cpu(core %d)\n", core_id);
+
+		if (disabled_core[core_id] == 0) {
+		pr_info("PMU update, core %d\n", core_id);
+/*
+			// Read PMU counters based on method
+			pmu_update(core_id);
+
+			__sync_fetch_and_add(&syncflag, 1);
+
+			//select out the master core
+			if(core_id == FIRST_CORE){
+				pr_info("FIRST_CORE, core %d\n", core_id);
+
+//				msleep(1);
+
+				pr_info("FIRST_CORE, continues at sync %d\n", syncflag);
+
+				kernel_basicalg(0);
+				syncflag = 0;
+			} else if (CORE_IN_MODULE == 0) {
+				pr_info("CORE_IN_MODULE, core %d\n", core_id);
+//				msleep(2);
+
+				//only the primary core per module needs to sync,
+				// rest can run free
+//				while (syncflag != 0);
+				//wait for decission to be made by master
+			}
+
+			if (CORE_IN_MODULE == 0 && msr_is_dirty(core_id) == 1){
+				//write new MSR settings, only one core in each module is needed
+				msr_update(core_id);
+				pr_info("MSR update on core %d at sync %d\n", core_id, syncflag);
+			}
+*/
+		} //if disabled
+	} //for each
 
 	hrtimer_forward_now(timer, kt_period);
 	return HRTIMER_RESTART;
@@ -68,7 +111,8 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 static int __init dpf_module_init(void)
 {
 	struct proc_dir_entry *entry;
-	
+	int core_id;
+
 	pr_info("dPF Module Loaded\n");
 
 	proc_buffer = kmalloc(PROC_BUFFER_SIZE, GFP_KERNEL);
@@ -85,6 +129,12 @@ static int __init dpf_module_init(void)
 		pr_err("Failed to create /proc entry\n");
 		kfree(proc_buffer);
 		return -ENOMEM;
+	}
+
+	//Load current Prefetch MSR settings
+	for_each_online_cpu(core_id) {
+		if ((disabled_core[core_id] == 0) && (CORE_IN_MODULE == 0))
+			msr_load(core_id);
 	}
 
 	// Set the timer interval
@@ -104,10 +154,10 @@ static void __exit dpf_module_exit(void)
 	keep_running = false;
 
 	hrtimer_cancel(&monitor_timer);
-	
+
 	remove_proc_entry(PROC_FILE_NAME, NULL);
 	kfree(proc_buffer);
-	
+
 	pr_info("dPF Module Unloaded\n");
 }
 

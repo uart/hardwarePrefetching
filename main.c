@@ -13,6 +13,7 @@
 #include <stdatomic.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
+#include <ncurses.h>
 
 #include "common.h"
 #include "primitive.h"
@@ -24,6 +25,7 @@
 #include "log.h"
 #include "sysdetect.h"
 #include "pcie.h"
+#include "user_api.h"
 
 #include "json_parser.h"
 
@@ -51,6 +53,7 @@ int tunealg = 0;
 uint32_t rdt_enabled = 0;
 int num_events;
 int pmu_method = PMU_RAW;
+int kernel_mode = 0;
 
 //global runtime
 volatile int quitflag = 0;
@@ -59,6 +62,7 @@ volatile int ddrbwflag = 0;
 volatile int msr_file_id[MAX_NUM_CORES];
 
 int core_priority[MAX_THREADS]; // Array to store the priority values
+int core_count;
 
 struct ddr_s ddr;
 
@@ -308,7 +312,6 @@ void print_usage(void)
 int parse_weights(char *weights_args)
 {
 	char *token, *endptr;
-	int core_count = 0;
 
 	token = strtok(weights_args, ",");
 
@@ -357,7 +360,8 @@ int main(int argc, char *argv[])
 
 	char weight_string[MAX_WEIGHT_STR_LEN] = {0};
 	float ddr_bw_auto_utilization = 0.7;
-
+	int ch;
+	
 	for (int i = 0; i < MAX_THREADS; i++)
 		core_priority[i] = MIN_PRIORITY;
 
@@ -394,6 +398,7 @@ int main(int argc, char *argv[])
 		    {"aggr", required_argument, 0, 'a'},
 		    {"log", required_argument, 0, 'l'},
 		    {"weight", required_argument, 0, 'w'},
+		    {"kernelmode", no_argument, 0, 'k'},
 		    {"perf", no_argument, 0, 'p'},
 		    {"help", no_argument, 0, 'h'},
 		    {NULL, no_argument, 0, 0},
@@ -403,9 +408,9 @@ int main(int argc, char *argv[])
 		int c;
 
 		if (json_argc > 0) {
-			c = getopt_long(json_argc, json_argv, "c:d:tD:i:A:a:l:w:ph", long_options, &option_index);
+			c = getopt_long(json_argc, json_argv, "c:d:tD:i:A:a:l:w:ph:k", long_options, &option_index);
 		} else {
-			c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph",
+			c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph:k",
 					long_options, &option_index);
 		}
 
@@ -462,6 +467,10 @@ int main(int argc, char *argv[])
 			aggr = strtof(optarg, 0);
 		break;
 
+		case 'k': //kernelmode
+			kernel_mode = 1;
+		break;
+
 		case 'l': //log
 			log_setlevel(strtol(optarg, 0, 10));
 		break;
@@ -514,11 +523,15 @@ int main(int argc, char *argv[])
 	if (strlen(weight_string) != 0) {
 		if (parse_weights(weight_string) < 0)
 			return -1;
+		if (kernel_mode == 1) {
+			if (kernel_set_core_weights(core_count,
+					core_priority) < 0)
+				return -1;
+		}
 	} else {
 		for (int i = 0; i < ACTIVE_THREADS; i++)
 			core_priority[i] = DEFAULT_PRIORITY;
 	}
-
 
 
 	//--ddrbw-set / ddrbw-test has not been used, so use ddrbw-auto
@@ -532,6 +545,52 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 	}
+
+
+
+	if (kernel_mode == 1) {
+
+		if (kernel_mode_init() < 0)
+			return -1;
+
+		if (core_first != -1 || core_last != -1) {
+			if (kernel_core_range(core_first, core_last) < 0) {
+				loge(TAG, "Failed to configure core range\n");
+				return -1;
+			}
+		}
+
+		if (ddr_bw_target != DDR_BW_NOT_SET && ddr_bw_target != DDR_BW_AUTOTEST) {
+			if (kernel_set_ddr_bandwidth(ddr_bw_target) < 0) {
+				loge(TAG, "Failed to set DDR bandwidth\n");
+				return -1;
+			}
+		}
+
+		logi(TAG,"Entering kernel mode tuning, press 'Q' to quit\n");
+		if (kernel_tuning_control(1) < 0)
+			return -1;
+
+		// Initialize ncurses for raw input
+
+		initscr();
+		cbreak();
+		noecho();
+
+		while ((ch = getchar()) != 'Q' && (ch != 'q')) {
+			sleep(1);
+		}
+
+		endwin();
+
+		if (kernel_tuning_control(0) < 0)
+			return -1;
+		logi(TAG, "Leaving kernel mode tuning - exiting dPF\n");
+		pcie_deinit();
+
+		return 0;
+	}
+
 
 
 	//Initialize DDR PMU

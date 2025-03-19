@@ -13,7 +13,7 @@
 #include <stdatomic.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
-#include <ncurses.h>
+#include <termios.h>
 
 #include "common.h"
 #include "primitive.h"
@@ -54,6 +54,8 @@ uint32_t rdt_enabled = 0;
 int num_events;
 int pmu_method = PMU_RAW;
 int kernel_mode = 0;
+int enable_pmu_msg = 0;
+int enable_msr_msg = 0;
 
 //global runtime
 volatile int quitflag = 0;
@@ -246,7 +248,7 @@ static void *thread_start(void *arg)
 	return 0;
 }
 
-void print_usage(void) 
+void print_usage(void)
 {
 	printf("\n*** System settings:\n");
 	printf("Default is to auto-detect Atom E-cores and both Hybrid Clients "
@@ -305,9 +307,9 @@ void print_usage(void)
 	printf(" -h --help - lists these arguments\n");
 }
 
-// parse_weights - Parses and validates core priorities from a comma-separated 
+// parse_weights - Parses and validates core priorities from a comma-separated
 // string. Sets priorities for each core, using default for any missing entries.
-// @weights_args: Comma-separated core priorities. Returns 0 on success, or -1 
+// @weights_args: Comma-separated core priorities. Returns 0 on success, or -1
 // for invalid input (non-integer or out-of-range values).
 int parse_weights(char *weights_args)
 {
@@ -353,6 +355,17 @@ int parse_weights(char *weights_args)
 	return 0;
 }
 
+// Non-blocking check for 'q' or 'Q'
+int kbhit(void)
+{
+	struct timeval tv = {0L, 0L};
+	fd_set fds;
+	FD_ZERO(&fds);
+	FD_SET(STDIN_FILENO, &fds);
+
+	return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+}
+
 int main(int argc, char *argv[])
 {
 	int json_argc = 0;
@@ -360,8 +373,7 @@ int main(int argc, char *argv[])
 
 	char weight_string[MAX_WEIGHT_STR_LEN] = {0};
 	float ddr_bw_auto_utilization = 0.7;
-	int ch;
-	
+
 	for (int i = 0; i < MAX_THREADS; i++)
 		core_priority[i] = MIN_PRIORITY;
 
@@ -369,7 +381,6 @@ int main(int argc, char *argv[])
 	loga(TAG, "This is the main file for the UU Hardware Prefetch and Control project\n");
 
 	signal(SIGINT, sigintHandler);
-
 
 	pcie_init();
 
@@ -386,7 +397,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	//decode command-line
+	// decode command-line
 	while (1) {
 		static struct option long_options[] = {
 		    {"core", required_argument, 0, 'c'},
@@ -400,6 +411,8 @@ int main(int argc, char *argv[])
 		    {"weight", required_argument, 0, 'w'},
 		    {"kernelmode", no_argument, 0, 'k'},
 		    {"perf", no_argument, 0, 'p'},
+		    {"msr", no_argument, 0, 'm'},
+		    {"pmu", no_argument, 0, 'P'},
 		    {"help", no_argument, 0, 'h'},
 		    {NULL, no_argument, 0, 0},
 		};
@@ -408,9 +421,9 @@ int main(int argc, char *argv[])
 		int c;
 
 		if (json_argc > 0) {
-			c = getopt_long(json_argc, json_argv, "c:d:tD:i:A:a:l:w:ph:k", long_options, &option_index);
+			c = getopt_long(json_argc, json_argv, "c:d:tD:i:A:a:l:w:ph:kPm", long_options, &option_index);
 		} else {
-			c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph:k",
+			c = getopt_long(argc, argv, "c:d:tD:i:A:a:l:w:ph:kPm",
 					long_options, &option_index);
 		}
 
@@ -419,80 +432,89 @@ int main(int argc, char *argv[])
 			break;
 
 		switch (c) {
-		case 'c': //core
+		case 'c': // core
 			core_first = strtol(optarg, 0, 10);
 			if (strstr(optarg, "-") == NULL)
 				core_last = core_first;
 			else
-				core_last = strtol(strstr(optarg, "-")
-					+ 1, 0, 10);
+				core_last = strtol(strstr(optarg, "-") + 1, 0, 10);
 
 			logi(TAG, "Cores: %d -> %d = %d threads\n", core_first,
-				core_last, core_last - core_first + 1);
+			     core_last, core_last - core_first + 1);
 
 			if (core_last - core_first > MAX_THREADS) {
 				loge(TAG, "Too many cores, max is %d\n",
-					MAX_THREADS);
+				     MAX_THREADS);
 				return -1;
 			}
-		break;
+			break;
 
-		case 'd': //ddrbw-auto
-			//override the 70% utilization factor
+		case 'd': // ddrbw-auto
+			// override the 70% utilization factor
 			ddr_bw_auto_utilization = strtof(optarg, NULL);
-		break;
+			break;
 
-		case 't': //ddrbw-test
+		case 't': // ddrbw-test
 			ddr_bw_target = DDR_BW_AUTOTEST;
-				//let's auto-test this
-		break;
+			// let's auto-test this
+			break;
 
-		case 'D': //ddrbw-set
+		case 'D': // ddrbw-set
 			ddr_bw_target = strtol(optarg, 0, 10);
-		break;
+			break;
 
-		case 'i': //intervall
+		case 'i': // intervall
 			time_intervall = strtof(optarg, NULL);
 			if (time_intervall < 0.0001f)
 				time_intervall = 0.0001f;
 			if (time_intervall > 60.0f)
 				time_intervall = 60.0f;
-		break;
+			break;
 
-		case 'A': //alg
+		case 'A': // alg
 			tunealg = strtol(optarg, 0, 10);
-		break;
+			break;
 
-		case 'a': //aggr
+		case 'a': // aggr
 			aggr = strtof(optarg, 0);
-		break;
+			break;
 
-		case 'k': //kernelmode
+		case 'k': // kernelmode
 			kernel_mode = 1;
-		break;
+			break;
 
-		case 'l': //log
+		case 'l': // log
 			log_setlevel(strtol(optarg, 0, 10));
-		break;
+			break;
 
-		case 'w': //weight
+		case 'w': // weight
 			strncpy(weight_string, optarg, MAX_WEIGHT_STR_LEN - 1);
 			weight_string[MAX_WEIGHT_STR_LEN - 1] = '\0';
-		break;
+			break;
 
 		case 'p':
 			pmu_method = PMU_PERF;
 			perf_configure_events(event_attrs, &num_events);
-		break;
+			break;
 
-		case '?': //getopt returns unknown argument
-		case 'h': //help
+		case 'm': // MSR
+			enable_msr_msg = 1;
+			logi(TAG, "MSR logging enabled\n");
+			break;
+
+		case 'P': // PMU
+			enable_pmu_msg = 1;
+			logi(TAG, "PMU logging enabled\n");
+			break;
+
+		case '?': // getopt returns unknown argument
+		case 'h': // help
 			print_usage();
 			return 0;
-		break;
+			break;
 		default:
 			loge(TAG, "Error, strange command-line argument %d\n",
-				c);
+			     c);
 			return -1;
 		}
 	}
@@ -502,8 +524,8 @@ int main(int argc, char *argv[])
 
 	//--core has not been used, so let's autodetect
 	if (core_first == -1 || core_last == -1) {
-		//auto-detect Atom E-cores and set first/last core to max
-		// E-cores
+		// auto-detect Atom E-cores and set first/last core to max
+		//  E-cores
 		struct e_cores_layout_s e_cores;
 
 		e_cores = get_efficient_core_ids();
@@ -512,7 +534,7 @@ int main(int argc, char *argv[])
 
 		if (core_first == -1 || core_last == -1) {
 			loge(TAG, "Error, no cores to run on! Do you have Atom "
-			"E-cores??\n");
+				  "E-cores??\n");
 
 			return -1;
 		}
@@ -533,7 +555,6 @@ int main(int argc, char *argv[])
 			core_priority[i] = DEFAULT_PRIORITY;
 	}
 
-
 	//--ddrbw-set / ddrbw-test has not been used, so use ddrbw-auto
 	if (ddr_bw_target == DDR_BW_NOT_SET) {
 		ddr_bw_target = dmi_get_bandwidth() * ddr_bw_auto_utilization;
@@ -545,8 +566,6 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 	}
-
-
 
 	if (kernel_mode == 1) {
 
@@ -567,21 +586,52 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		logi(TAG,"Entering kernel mode tuning, press 'Q' to quit\n");
+		logi(TAG, "Entering kernel mode tuning, press 'Q' to quit, 'm' "
+			  "to toggle MSR logging, 'p' to toggle PMU logging\n");
+
 		if (kernel_tuning_control(1) < 0)
 			return -1;
 
-		// Initialize ncurses for raw input
+		struct termios oldt, newt;
+		tcgetattr(STDIN_FILENO, &oldt);
+		newt = oldt;
+		newt.c_lflag &= ~(ICANON | ECHO);
+		tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
-		initscr();
-		cbreak();
-		noecho();
+		while (1) {
+			usleep(100000);
+			if (kbhit()) {
+				int ch = getchar();
+				if (ch == 'q' || ch == 'Q') {
+					break;
+				} else if (ch == 'm' || ch == 'M') {
+					enable_msr_msg = !enable_msr_msg;
+					logi(TAG, "MSR logging %s\n", enable_msr_msg ? "enabled" : "disabled");
+				} else if (ch == 'p' || ch == 'P') {
+					enable_pmu_msg = !enable_pmu_msg;
+					logi(TAG, "PMU logging %s\n", enable_pmu_msg ? "enabled" : "disabled");
+				}
+			}
 
-		while ((ch = getchar()) != 'Q' && (ch != 'q')) {
-			sleep(1);
+			for (int core_id = core_first;
+				core_id <= core_last; core_id++) {
+				if (enable_msr_msg == 1) {
+					if (kernel_log_msr_values(core_id) < 0) {
+						loge(TAG, "Error reading MSR values for core %d\n", core_id);
+					}
+				}
+				if (enable_pmu_msg == 1) {
+					if (kernel_log_pmu_values(core_id) < 0) {
+						loge(TAG, "Error reading PMU values for core %d\n", core_id);
+					}
+				}
+			}
+
+			fflush(stdout);
+
 		}
 
-		endwin();
+		tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 
 		if (kernel_tuning_control(0) < 0)
 			return -1;
@@ -591,13 +641,11 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-
-
-	//Initialize DDR PMU
+	// Initialize DDR PMU
 	if (pmu_ddr_init(&ddr) == DDR_NONE) {
-		//lets try RDT instread
+		// lets try RDT instread
 
-		//DDR init, with RDT if supported (servers)
+		// DDR init, with RDT if supported (servers)
 		int ret_val = rdt_mbm_support_check();
 
 		if (!ret_val) {
@@ -614,19 +662,19 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	//Algorithm init
+	// Algorithm init
 	if (tunealg == 2)
 		mab_init(&mstate, ACTIVE_THREADS);
 
-	//Initialization done - let's start running...
+	// Initialization done - let's start running...
 
 	for (int tnum = 0; tnum <= (core_last - core_first); tnum++) {
 		gtinfo[tnum].core_id = core_first + tnum;
 		pthread_create(&gtinfo[tnum].thread_id, NULL,
-			&thread_start, &gtinfo[tnum]);
+			       &thread_start, &gtinfo[tnum]);
 	}
 
-	//Run forever or until all threads are returning, then we wrap up
+	// Run forever or until all threads are returning, then we wrap up
 
 	void *ret;
 

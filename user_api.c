@@ -1,6 +1,7 @@
-
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -9,6 +10,7 @@
 #include "kernelmod/kernel_common.h"
 
 #define TAG "KERNEL_API"
+#define PROC_DEVICE "/proc/dpf_monitor"
 
 
 // Initializes the kernel mode interface for hardware prefetching
@@ -117,7 +119,7 @@ int kernel_set_core_weights(int count, int *core_priority)
 	struct dpf_resp_core_weight *resp = malloc(resp_size);
 
 	if (!req || !resp) {
-		perror("Memory allocation failed");
+		loge(TAG, "Memory allocation failed\n");
 		free(req);
 		free(resp);
 		return -1;
@@ -245,6 +247,119 @@ int kernel_tuning_control(uint32_t tuning_status)
 	logd(TAG, "Tuning status: %u\n", resp.status);
 
 	close(fd);
+
+	return 0;
+}
+
+
+int kernel_msr_read(uint32_t core_id, uint64_t *msr_values)
+{
+	int fd;
+	ssize_t ret;
+	struct dpf_msr_read req;
+	struct dpf_resp_msr_read resp;
+
+	req.header.type = DPF_MSG_MSR_READ;
+	req.header.payload_size = sizeof(struct dpf_msr_read);
+	req.core_id = core_id;
+
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open %s for MSR read\n", PROC_DEVICE);
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write MSR read request for core %u\n", core_id);
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, &resp, sizeof(resp));
+	if (ret < 0 || ret != sizeof(resp)) {
+		loge(TAG, "Failed to read MSR values for core %u\n", core_id);
+		close(fd);
+		return -1;
+	}
+
+	memcpy(msr_values, resp.msr_values, NR_OF_MSR * sizeof(uint64_t));
+	close(fd);
+
+	return 0;
+}
+
+int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
+{
+	int fd;
+	ssize_t ret;
+	struct dpf_pmu_read req;
+	struct dpf_resp_pmu_read resp;
+
+	req.header.type = DPF_MSG_PMU_READ;
+	req.header.payload_size = sizeof(struct dpf_pmu_read);
+	req.core_id = core_id;
+
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open %s for PMU read\n", PROC_DEVICE);
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write PMU read request for core %u\n", core_id);
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, &resp, sizeof(resp));
+	if (ret < 0 || ret != sizeof(resp)) {
+		loge(TAG, "Failed to read PMU values for core %u (ret = %zd, expected = %zu)\n", core_id, ret, sizeof(resp));
+		close(fd);
+		return -1;
+	}
+
+	memcpy(pmu_values, resp.pmu_values, PMU_COUNTERS * sizeof(uint64_t));
+	close(fd);
+
+	return 0;
+}
+
+// Logs MSR values for a specific core
+// core_id: The CPU core to read from
+// Returns: 0 on success, -1 on failure
+int kernel_log_msr_values(uint32_t core_id)
+{
+	uint64_t msr_values[NR_OF_MSR];
+	if (kernel_msr_read(core_id, msr_values) < 0) {
+		loge(TAG, "Failed to read MSR values for core %d\n", core_id);
+		return -1;
+	}
+
+	logi(TAG, "MSR values for core %d:\n", core_id);
+	for (int i = 0; i < NR_OF_MSR; i++) {
+		logi(TAG, "MSR %d: 0x%llx\n", i, msr_values[i]);
+	}
+
+	return 0;
+}
+
+// Logs PMU values for a specific core
+// core_id: The CPU core to read from
+// Returns: 0 on success, -1 on failure
+int kernel_log_pmu_values(uint32_t core_id)
+{
+	uint64_t pmu_values[PMU_COUNTERS];
+	if (kernel_pmu_read(core_id, pmu_values) < 0) {
+		loge(TAG, "Failed to read PMU values for core %d\n", core_id);
+		return -1;
+	}
+
+	logi(TAG, "PMU values for core %d:\n", core_id);
+	for (int i = 0; i < PMU_COUNTERS; i++) {
+		logi(TAG, "PMU %d: %llu\n", i, pmu_values[i]);
+	}
 
 	return 0;
 }

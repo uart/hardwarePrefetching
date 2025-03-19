@@ -167,6 +167,7 @@ int kernel_set_core_weights(int count, int *core_priority)
 	return 0;
 }
 
+
 // Sets specific DDR bandwidth value
 // it accepts the requested bandwidth value
 // Returns: 0 on success, and -1 on failure
@@ -210,6 +211,7 @@ int kernel_set_ddr_bandwidth(uint32_t bandwidth)
 	close(fd);
 	return 0;
 }
+
 
 // Controls the tuning status of the API
 // accept tuning_status: Enable (1) or disable (0)
@@ -289,6 +291,10 @@ int kernel_msr_read(uint32_t core_id, uint64_t *msr_values)
 	return 0;
 }
 
+
+// Read PMU values
+//accept: Specific core id and array (pmu_values)
+// Returns: 0 on success, and -1 on failure
 int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
 {
 	int fd;
@@ -326,6 +332,7 @@ int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
 	return 0;
 }
 
+
 // Logs MSR values for a specific core
 // core_id: The CPU core to read from
 // Returns: 0 on success, -1 on failure
@@ -344,6 +351,7 @@ int kernel_log_msr_values(uint32_t core_id)
 
 	return 0;
 }
+
 
 // Logs PMU values for a specific core
 // core_id: The CPU core to read from

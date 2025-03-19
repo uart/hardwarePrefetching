@@ -53,7 +53,9 @@ static int configure_pmu(int core_id)
 	return 0;
 }
 
-// Handles initialization, sets up module version response
+// Handle initialization request and response to the user space
+// Arguments: None
+// Returns: 0 on success, -ENOMEM on failure
 static int handle_init(void)
 {
 	struct dpf_resp_init *resp;
@@ -77,7 +79,9 @@ static int handle_init(void)
 	return 0;
 }
 
-// Handles core range config, enables/disables cores and sets PMU
+// Handle core range configuration request and response to the user space
+// It accepts a request to specify the range of cores to monitor
+// returns 0 on success, -ENOMEM on failure
 static int handle_core_range(struct dpf_core_range *req_data)
 {
 	struct dpf_core_range *req = req_data;
@@ -119,7 +123,9 @@ static int handle_core_range(struct dpf_core_range *req_data)
 	return 0;
 }
 
-// Handles core weight config, sets weights for cores
+// Handle core weight configuration request and response to the user space
+// It accepts a request to specify the weight of each core
+// returns 0 on success, -ENOMEM on failure
 static int handle_core_weight(void *req_data)
 {
 	struct dpf_core_weight *req = req_data;
@@ -157,7 +163,9 @@ static int handle_core_weight(void *req_data)
 	return 0;
 }
 
-// Handles tuning request, starts/stops monitoring and loads MSRs
+// Handle tuning request and response to the user space
+// It accepts a request to enable or disable the monitoring
+// returns 0 on success, -ENOMEM on failure
 static int handle_tuning(struct dpf_req_tuning *req_data)
 {
 	struct dpf_req_tuning *req = req_data;
@@ -199,7 +207,9 @@ static int handle_tuning(struct dpf_req_tuning *req_data)
 	return 0;
 }
 
-// Handles DDR bandwidth set, updates target bandwidth
+// Handle DDR bandwidth set request and response to the user space
+// It accepts a request to set the DDR bandwidth target
+// returns 0 on success, -ENOMEM on failure
 static int handle_ddrbw_set(struct dpf_ddrbw_set *req_data)
 {
 	struct dpf_ddrbw_set *req = req_data;
@@ -412,6 +422,12 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 	if (!keep_running)
 		return HRTIMER_NORESTART;
 
+	/*
+	This should be replaced by something faster such as smp_call_function() instead. See this:
+	https://yarchive.net/comp/linux/work_on_cpu.html
+
+	*/
+
 	for_each_online_cpu(core_id) {
 		pr_info("for_each_online_cpu(core %d)\n", core_id); // REMOVE AFTER DEBUG
 
@@ -426,6 +442,7 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 			}
 
 			if (CORE_IN_MODULE == 0 && is_msr_dirty(core_id) == 1) {
+				// write new MSR settings, only one core in each module is needed
 				msr_update(core_id);
 				pr_info("MSR update on core %d\n", core_id); // REMOVE AFTER DEBUG
 			}

@@ -5,9 +5,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "log.h"
-#include "user_api.h"
 #include "kernelmod/kernel_common.h"
+#include "log.h"
+#include "pcie.h"
+#include "pmu_ddr.h"
+#include "user_api.h"
 
 #define TAG "KERNEL_API"
 #define PROC_DEVICE "/proc/dpf_monitor"
@@ -368,6 +370,52 @@ int kernel_log_pmu_values(uint32_t core_id)
 	for (int i = 0; i < PMU_COUNTERS; i++) {
 		logi(TAG, "PMU %d: %llu\n", i, pmu_values[i]);
 	}
+
+	return 0;
+}
+
+int kernel_set_ddr_config(struct ddr_s *ddr) {
+	int fd;
+	ssize_t ret;
+	struct dpf_ddr_config req;
+	struct dpf_resp_ddr_config resp;
+
+	if (ddr->ddr_interface_type == DDR_NONE) {
+		loge(TAG, "Failed to detect DDR configuration\n");
+		return -1;
+	}
+
+	// Prepare DDR config request
+	req.header.type = DPF_MSG_DDR_CONFIG;
+	req.header.payload_size = sizeof(struct dpf_ddr_config);
+	req.bar_address = ddr->bar_address;
+	req.cpu_type = ddr->ddr_interface_type;
+
+	// Open proc interface
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open device file for DDR config\n");
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write DDR config request\n");
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, &resp, sizeof(resp));
+	if (ret < 0) {
+		loge(TAG, "Failed to read DDR config response\n");
+		close(fd);
+		return -1;
+	}
+
+	logd(TAG, "DDR config confirmed: BAR=0x%llx, Type=%u\n",
+	     resp.confirmed_bar, resp.confirmed_type);
+
+	close(fd);
 
 	return 0;
 }

@@ -52,13 +52,14 @@ enum pmu_metrics {
 
 // Enum for message types between user space and kernel module
 enum dpf_msg_type {
-    DPF_MSG_INIT = 0,       // API version negotiation
-    DPF_MSG_CORE_RANGE = 1, // Core range configuration
-    DPF_MSG_DDRBW_SET = 2,  // DDR bandwidth setting
-    DPF_MSG_CORE_WEIGHT = 3,// Core weight assignment
-    DPF_MSG_TUNING = 4,     // Tuning control
-    DPF_MSG_MSR_READ = 5,   // Read MSR values
-    DPF_MSG_PMU_READ = 6    // Read PMU values
+	DPF_MSG_INIT = 0,	 // API version negotiation
+	DPF_MSG_CORE_RANGE = 1,	 // Core range configuration
+	DPF_MSG_DDRBW_SET = 2,	 // DDR bandwidth setting
+	DPF_MSG_CORE_WEIGHT = 3, // Core weight assignment
+	DPF_MSG_TUNING = 4,	 // Tuning control
+	DPF_MSG_MSR_READ = 5,	 // Read MSR values
+	DPF_MSG_PMU_READ = 6,	 // Read PMU values
+	DPF_MSG_DDR_CONFIG = 7   // DDR configuration
 };
 
 // Message structures
@@ -139,6 +140,20 @@ struct dpf_pmu_read {
 struct dpf_resp_pmu_read {
     struct dpf_msg_header header;
     __u64 pmu_values[PMU_COUNTERS]; // Array of PMU counter values
+};
+
+// Request structure for DDR configuration
+struct dpf_ddr_config {
+	struct dpf_msg_header header;
+	__u64 bar_address; // BAR address for DDR config space
+	__u32 cpu_type;	   // CPU type (e.g., DDR_CLIENT, DDR_GRR_SRF)
+};
+
+// Response structure for DDR configuration
+struct dpf_resp_ddr_config {
+	struct dpf_msg_header header;
+	__u64 confirmed_bar;  // Confirmed BAR address
+	__u32 confirmed_type; // Confirmed CPU type
 };
 
 // Core state structure

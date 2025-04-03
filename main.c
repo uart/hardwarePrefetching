@@ -67,6 +67,7 @@ int core_priority[MAX_THREADS]; // Array to store the priority values
 int core_count;
 
 struct ddr_s ddr;
+uint64_t ddr_bar = 0;
 
 void sigintHandler(int sig_num)
 {
@@ -567,10 +568,38 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	// Initialize DDR PMU
+	if (pmu_ddr_init(&ddr, kernel_mode) == DDR_NONE) {
+		// lets try RDT instread
+
+		// DDR init, with RDT if supported (servers)
+		int ret_val = rdt_mbm_support_check();
+
+		if (!ret_val) {
+			logi(TAG, "RDT MBM supported\n");
+			ret_val = rdt_mbm_init();
+			if (ret_val) {
+				loge(TAG, "Error in initializing RDT MBM\n");
+				return ret_val;
+			}
+			rdt_enabled = 1;
+		} else {
+			loge(TAG, "Neither DDR nor RDT support was found\n");
+			return -1;
+		}
+	}
+
 	if (kernel_mode == 1) {
 
 		if (kernel_mode_init() < 0)
 			return -1;
+
+		// Initialize DDR configuration
+		if (kernel_set_ddr_config(&ddr) < 0) {
+			loge(TAG, "Failed to set DDR configuration in"
+				  "kernel\n");
+			return -1;
+		}
 
 		if (core_first != -1 || core_last != -1) {
 			if (kernel_core_range(core_first, core_last) < 0) {
@@ -641,26 +670,6 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	// Initialize DDR PMU
-	if (pmu_ddr_init(&ddr) == DDR_NONE) {
-		// lets try RDT instread
-
-		// DDR init, with RDT if supported (servers)
-		int ret_val = rdt_mbm_support_check();
-
-		if (!ret_val) {
-			logi(TAG, "RDT MBM supported\n");
-			ret_val = rdt_mbm_init();
-			if (ret_val) {
-				loge(TAG, "Error in initializing RDT MBM\n");
-				return ret_val;
-			}
-			rdt_enabled = 1;
-		} else {
-			loge(TAG, "Neither DDR nor RDT support was found\n");
-			return -1;
-		}
-	}
 
 	// Algorithm init
 	if (tunealg == 2)

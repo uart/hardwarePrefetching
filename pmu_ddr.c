@@ -96,12 +96,10 @@ static int pmu_ddr_init_client(struct ddr_s *ddr, uint64_t ddr_bar)
 
 //Searches and initializes the DDR PMU
 //Returns interface type, including DDR_NONE if nothing found
-int pmu_ddr_init(struct ddr_s *ddr)
+int pmu_ddr_init(struct ddr_s *ddr, int kernel_mode)
 {
 	struct pci_dev *dev;
 	uint64_t ddr_bar = 0;
-
-	ddr_interface_type = DDR_NONE;
 
 	dev = pcie_get_devices();
 
@@ -154,16 +152,22 @@ int pmu_ddr_init(struct ddr_s *ddr)
 		dev = dev->next;
 	}
 
-	if (ddr_interface_type == DDR_CLIENT) {
-		int ret = pmu_ddr_init_client(ddr, ddr_bar);
+	ddr->ddr_interface_type = ddr_interface_type;
+	ddr->bar_address = ddr_bar;
 
-		if (ret < 0)
-			ddr_interface_type = DDR_NONE;
-	} else if (ddr_interface_type == DDR_GRR_SRF) {
-		int ret = pmu_ddr_init_grr_srf(ddr, ddr_bar);
+	// Kernel-space initialization
+	if (kernel_mode != 1) {
+		if (ddr_interface_type == DDR_CLIENT) {
+			int ret = pmu_ddr_init_client(ddr, ddr_bar);
 
-		if (ret < 0)
-			ddr_interface_type = DDR_NONE;
+			if (ret < 0)
+				ddr_interface_type = DDR_NONE;
+		} else if (ddr_interface_type == DDR_GRR_SRF) {
+			int ret = pmu_ddr_init_grr_srf(ddr, ddr_bar);
+
+			if (ret < 0)
+				ddr_interface_type = DDR_NONE;
+		}
 	}
 
 	return ddr_interface_type;

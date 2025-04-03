@@ -1,8 +1,6 @@
 #ifndef __PMU_DDR_H
 #define __PMU_DDR_H
 
-#include <stdio.h>
-#include <stdint.h>
 
 #define DDR_NONE (-1)
 #define DDR_CLIENT (1)
@@ -36,9 +34,11 @@ struct ddr_s {
 	uint64_t wr_last_update[MAX_NUM_DDR_CONTROLLERS];
 	char *mmap[MAX_NUM_DDR_CONTROLLERS]; //ddr ch 0, 1, ...
 	int mem_file; //file desc
+	uint64_t bar_address;
+	int ddr_interface_type;
 };
 
-int pmu_ddr_init(struct ddr_s *ddr);
+int pmu_ddr_init(struct ddr_s *ddr, int kernel_mode);
 uint64_t pmu_ddr(struct ddr_s *ddr, int type);
 
 

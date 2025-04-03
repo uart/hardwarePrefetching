@@ -15,6 +15,6 @@ int kernel_msr_read(uint32_t core_id, uint64_t *msr_values);
 int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values);
 int kernel_log_msr_values(uint32_t core_id);
 int kernel_log_pmu_values(uint32_t core_id);
-
+int kernel_set_ddr_config(struct ddr_s *ddr);
 
 #endif /* __USER_API_H */

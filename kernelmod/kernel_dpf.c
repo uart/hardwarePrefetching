@@ -15,8 +15,9 @@
 
 #include "kernel_common.h"
 #include "kernel_primitive.h"
-#define TIMER_INTERVAL_SEC 1
+#include "../include/pmu_ddr.h"
 
+#define TIMER_INTERVAL_SEC 1
 #define PROC_FILE_NAME "dpf_monitor"
 #define PROC_BUFFER_SIZE (1024)
 
@@ -25,6 +26,8 @@ static struct hrtimer monitor_timer;
 static ktime_t kt_period;
 static char *proc_buffer;
 static size_t proc_buffer_size = 0;
+static __u64 ddr_bar_address = 0;
+static __u32 ddr_cpu_type = DDR_NONE;
 
 static DEFINE_MUTEX(dpf_mutex);
 
@@ -322,6 +325,39 @@ static int handle_pmu_read(struct dpf_pmu_read *req_data) {
 	return 0;
 }
 
+// Handle DDR configuration request
+static int handle_ddr_config(struct dpf_ddr_config *req_data)
+{
+	struct dpf_ddr_config *req = req_data;
+	struct dpf_resp_ddr_config *resp;
+
+	pr_info("handle_ddr_config: Received BAR=0x%llx, CPU type=%u\n",
+		req->bar_address, req->cpu_type);
+
+	resp = kmalloc(sizeof(struct dpf_resp_ddr_config), GFP_KERNEL);
+	if (!resp) {
+		pr_err("handle_ddr_config: Failed to allocate memory\n");
+		return -ENOMEM;
+	}
+
+	ddr_bar_address = req->bar_address;
+	ddr_cpu_type = req->cpu_type;
+
+	resp->header.type = DPF_MSG_DDR_CONFIG;
+	resp->header.payload_size = sizeof(struct dpf_resp_ddr_config);
+	resp->confirmed_bar = ddr_bar_address;
+	resp->confirmed_type = ddr_cpu_type;
+
+	if (proc_buffer)
+		kfree(proc_buffer);
+	proc_buffer = (char *)resp;
+	proc_buffer_size = sizeof(struct dpf_resp_ddr_config);
+
+	pr_info("handle_ddr_config: DDR config set - BAR=0x%llx, Type=%u\n",
+		ddr_bar_address, ddr_cpu_type);
+
+	return 0;
+}
 
 static ssize_t proc_read(struct file *file, char __user *buffer,
 			 size_t count, loff_t *pos)
@@ -397,6 +433,9 @@ static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 		break;
 	case DPF_MSG_MSR_READ:
 		ret = handle_msr_read(msg_data);
+		break;
+	case DPF_MSG_DDR_CONFIG:
+		ret = handle_ddr_config(msg_data);
 		break;
 	default:
 		ret = -EINVAL;

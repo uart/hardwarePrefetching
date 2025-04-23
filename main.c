@@ -67,6 +67,7 @@ int core_priority[MAX_THREADS]; // Array to store the priority values
 int core_count;
 
 struct ddr_s ddr;
+uint64_t ddr_bar = 0;
 
 void sigintHandler(int sig_num)
 {
@@ -567,11 +568,39 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	// Initialize DDR PMU
+	if (pmu_ddr_init(&ddr, kernel_mode) == DDR_NONE) {
+		// lets try RDT instread
+
+		// DDR init, with RDT if supported (servers)
+		int ret_val = rdt_mbm_support_check();
+
+		if (!ret_val) {
+			logi(TAG, "RDT MBM supported\n");
+			ret_val = rdt_mbm_init();
+			if (ret_val) {
+				loge(TAG, "Error in initializing RDT MBM\n");
+				return ret_val;
+			}
+			rdt_enabled = 1;
+		} else {
+			loge(TAG, "Neither DDR nor RDT support was found\n");
+			return -1;
+		}
+	}
+
 	if (kernel_mode == 1) {
 
 		if (kernel_mode_init() < 0)
 			return -1;
 
+		// Initialize DDR configuration
+		if (kernel_set_ddr_config(&ddr) < 0) {
+			loge(TAG, "Failed to set DDR configuration in"
+				  "kernel\n");
+			return -1;
+		}
+		
 		if (core_first != -1 || core_last != -1) {
 			if (kernel_core_range(core_first, core_last) < 0) {
 				loge(TAG, "Failed to configure core range\n");
@@ -579,11 +608,16 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		if (ddr_bw_target != DDR_BW_NOT_SET && ddr_bw_target != DDR_BW_AUTOTEST) {
+		if (ddr_bw_target != DDR_BW_NOT_SET && ddr_bw_target !=
+		DDR_BW_AUTOTEST) {
 			if (kernel_set_ddr_bandwidth(ddr_bw_target) < 0) {
 				loge(TAG, "Failed to set DDR bandwidth\n");
 				return -1;
 			}
+		}
+
+		if (kernel_log_ddr_bw() < 0) {
+			return -1;
 		}
 
 		logi(TAG, "Entering kernel mode tuning, press 'Q' to quit, 'm' "
@@ -606,7 +640,8 @@ int main(int argc, char *argv[])
 					break;
 				} else if (ch == 'm' || ch == 'M') {
 					enable_msr_msg = !enable_msr_msg;
-					logi(TAG, "MSR logging %s\n", enable_msr_msg ? "enabled" : "disabled");
+					logi(TAG,
+					 "MSR logging %s\n", enable_msr_msg ? "enabled" : "disabled");
 				} else if (ch == 'p' || ch == 'P') {
 					enable_pmu_msg = !enable_pmu_msg;
 					logi(TAG, "PMU logging %s\n", enable_pmu_msg ? "enabled" : "disabled");
@@ -621,7 +656,8 @@ int main(int argc, char *argv[])
 					}
 				}
 				if (enable_pmu_msg == 1) {
-					if (kernel_log_pmu_values(core_id) < 0) {
+					if (kernel_log_pmu_values(core_id) < 0) 
+					{
 						loge(TAG, "Error reading PMU values for core %d\n", core_id);
 					}
 				}
@@ -641,26 +677,6 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	// Initialize DDR PMU
-	if (pmu_ddr_init(&ddr) == DDR_NONE) {
-		// lets try RDT instread
-
-		// DDR init, with RDT if supported (servers)
-		int ret_val = rdt_mbm_support_check();
-
-		if (!ret_val) {
-			logi(TAG, "RDT MBM supported\n");
-			ret_val = rdt_mbm_init();
-			if (ret_val) {
-				loge(TAG, "Error in initializing RDT MBM\n");
-				return ret_val;
-			}
-			rdt_enabled = 1;
-		} else {
-			loge(TAG, "Neither DDR nor RDT support was found\n");
-			return -1;
-		}
-	}
 
 	// Algorithm init
 	if (tunealg == 2)
@@ -688,4 +704,3 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-

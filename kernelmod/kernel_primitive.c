@@ -1,15 +1,17 @@
 #define _GNU_SOURCE
 
 #include <linux/timekeeping.h>
+#include <linux/printk.h>
+#include <linux/types.h>
 
 #include "kernel_common.h"
 #include "kernel_primitive.h"
-
+#include "kernel_pmu_ddr.h"
 
 //only tunealg 0 is supported at this time
 int kernel_basicalg(int tunealg)
 {
-	uint64_t ddr_rd_bw; //only used for the first thread
+	uint64_t ddr_rd_bw,ddr_wr_bw; //only used for the first thread
 	uint64_t time_now, time_old = 0;
 	uint64_t time_delta;
 
@@ -17,8 +19,10 @@ int kernel_basicalg(int tunealg)
 	// Grab all PMU data
 	//
 
-	ddr_rd_bw = 10000000; //hardcode to 10MB for now   should be: pmu_ddr(&ddr, DDR_PMU_RD);
-	//pr_info("DDR RD BW: %ld MB/s\n", ddr_rd_bw/(1024*1024));
+	ddr_rd_bw = kernel_pmu_ddr(&ddr, DDR_PMU_RD);
+	ddr_wr_bw = kernel_pmu_ddr(&ddr, DDR_PMU_WR);
+
+	pr_info("DDR RD BW: %llu MB/s\n", ddr_rd_bw/(1024*1024));
 
 	if (time_old == 0) {
 		time_old = ktime_get_ns();

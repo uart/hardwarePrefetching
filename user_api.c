@@ -12,8 +12,7 @@
 #include "user_api.h"
 
 #define TAG "KERNEL_API"
-#define PROC_DEVICE "/proc/dpf_monitor"
-
+#define PROC_DEVICE "/proc/dynamicPrefetch"
 
 // Initializes the kernel mode interface for hardware prefetching
 // Arguments: No arguments.
@@ -57,7 +56,6 @@ int kernel_mode_init(void)
 	return 0;
 }
 
-
 // Configures the range of CPU cores to be used for prefetching
 // start: Starting core number, end: Ending core number in the range
 // Returns: 0 on success, -1 on failure (device access errors)
@@ -98,10 +96,9 @@ int kernel_core_range(uint32_t start, uint32_t end)
 	return 0;
 }
 
-
-//Sets priority weights for each core
+// Sets priority weights for each core
 // accepts: array length (count) and array of priority values (core_priority)
-// Returns: 0 on success, and -1 if an error occured
+// Returns: 0 on success, and -1 if an error occurred
 int kernel_set_core_weights(int count, int *core_priority)
 {
 	int fd;
@@ -112,10 +109,8 @@ int kernel_set_core_weights(int count, int *core_priority)
 		return -1;
 	}
 
-	size_t req_size = sizeof(struct dpf_core_weight)
-		+ count * sizeof(uint32_t);
-	size_t resp_size = sizeof(struct dpf_resp_core_weight)
-		+ count * sizeof(uint32_t);
+	size_t req_size = sizeof(struct dpf_core_weight) + count * sizeof(uint32_t);
+	size_t resp_size = sizeof(struct dpf_resp_core_weight) + count * sizeof(uint32_t);
 
 	struct dpf_core_weight *req = malloc(req_size);
 	struct dpf_resp_core_weight *resp = malloc(resp_size);
@@ -131,9 +126,8 @@ int kernel_set_core_weights(int count, int *core_priority)
 	req->header.payload_size = req_size;
 	req->count = count;
 
-	for (int i = 0; i < count; i++) {
+	for (int i = 0; i < count; i++)
 		req->weights[i] = core_priority[i];
-	}
 
 	fd = open(PROC_DEVICE, O_RDWR);
 	if (fd < 0) {
@@ -158,9 +152,9 @@ int kernel_set_core_weights(int count, int *core_priority)
 	}
 
 	logd(TAG, "Confirmed Core weights set:\n");
-	for (int i = 0; i < count; i++) {
-		logd(TAG, "Core %u: priority %u\n", i, resp->confirmed_weights[i]);
-	}
+	for (int i = 0; i < count; i++)
+		logd(TAG, "Core %u: priority %u\n", i,
+			resp->confirmed_weights[i]);
 
 	close(fd);
 	free(req);
@@ -168,7 +162,6 @@ int kernel_set_core_weights(int count, int *core_priority)
 
 	return 0;
 }
-
 
 // Sets specific DDR bandwidth value
 // it accepts the requested bandwidth value
@@ -214,7 +207,6 @@ int kernel_set_ddr_bandwidth(uint32_t bandwidth)
 	return 0;
 }
 
-
 // Controls the tuning status of the API
 // accept tuning_status: Enable (1) or disable (0)
 // Returns: 0 on success, -1 on failure (device access errors)
@@ -255,7 +247,9 @@ int kernel_tuning_control(uint32_t tuning_status)
 	return 0;
 }
 
-
+// Read MSR values
+// accept: Specific core id and array (msr_values)
+// Returns: 0 on success, and -1 on failure
 int kernel_msr_read(uint32_t core_id, uint64_t *msr_values)
 {
 	int fd;
@@ -293,9 +287,8 @@ int kernel_msr_read(uint32_t core_id, uint64_t *msr_values)
 	return 0;
 }
 
-
 // Read PMU values
-//accept: Specific core id and array (pmu_values)
+// accept: Specific core id and array (pmu_values)
 // Returns: 0 on success, and -1 on failure
 int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
 {
@@ -334,6 +327,46 @@ int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
 	return 0;
 }
 
+// Read DDR bandwidth values
+// accept: Pointers to read_bw and write_bw
+// Returns: 0 on success, -1 on failure
+int kernel_ddr_bw_read(uint64_t *read_bw, uint64_t *write_bw)
+{
+	int fd;
+	ssize_t ret;
+	struct dpf_ddr_bw_read req;
+	struct dpf_resp_ddr_bw_read resp;
+
+	req.header.type = DPF_MSG_DDR_BW_READ;
+	req.header.payload_size = sizeof(struct dpf_ddr_bw_read);
+
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open %s for DDR bandwidth read\n", PROC_DEVICE);
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write DDR bandwidth read request\n");
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, &resp, sizeof(resp));
+	if (ret < 0 || ret != sizeof(resp)) {
+		loge(TAG, "Failed to read DDR bandwidth values (ret = %zd, expected = %zu)\n",
+		     ret, sizeof(resp));
+		close(fd);
+		return -1;
+	}
+
+	*read_bw = resp.read_bw;
+	*write_bw = resp.write_bw;
+
+	close(fd);
+	return 0;
+}
 
 // Logs MSR values for a specific core
 // core_id: The CPU core to read from
@@ -341,19 +374,19 @@ int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
 int kernel_log_msr_values(uint32_t core_id)
 {
 	uint64_t msr_values[NR_OF_MSR];
+
 	if (kernel_msr_read(core_id, msr_values) < 0) {
 		loge(TAG, "Failed to read MSR values for core %d\n", core_id);
 		return -1;
 	}
 
 	logi(TAG, "MSR values for core %d:\n", core_id);
-	for (int i = 0; i < NR_OF_MSR; i++) {
+
+	for (int i = 0; i < NR_OF_MSR; i++)
 		logi(TAG, "MSR %d: 0x%llx\n", i, msr_values[i]);
-	}
 
 	return 0;
 }
-
 
 // Logs PMU values for a specific core
 // core_id: The CPU core to read from
@@ -361,20 +394,45 @@ int kernel_log_msr_values(uint32_t core_id)
 int kernel_log_pmu_values(uint32_t core_id)
 {
 	uint64_t pmu_values[PMU_COUNTERS];
+
 	if (kernel_pmu_read(core_id, pmu_values) < 0) {
 		loge(TAG, "Failed to read PMU values for core %d\n", core_id);
 		return -1;
 	}
 
 	logi(TAG, "PMU values for core %d:\n", core_id);
-	for (int i = 0; i < PMU_COUNTERS; i++) {
+
+	for (int i = 0; i < PMU_COUNTERS; i++)
 		logi(TAG, "PMU %d: %llu\n", i, pmu_values[i]);
-	}
 
 	return 0;
 }
 
-int kernel_set_ddr_config(struct ddr_s *ddr) {
+// Logs DDR bandwidth values
+// Returns: 0 on success, -1 on failure
+int kernel_log_ddr_bw(void)
+{
+	uint64_t read_bw, write_bw;
+
+	if (kernel_ddr_bw_read(&read_bw, &write_bw) < 0) {
+		loge(TAG, "Failed to read DDR bandwidth values\n");
+		return -1;
+	}
+
+	double read_mbps = (double)read_bw / (1024 * 1024);
+	double write_mbps = (double)write_bw / (1024 * 1024);
+
+	logi(TAG, "DDR Bandwidth: Read=%llu bytes (%.2f MB/s), Write=%llu bytes (%.2f MB/s)\n",
+	     read_bw, read_mbps, write_bw, write_mbps);
+
+	return 0;
+}
+
+// Sets the DDR configuration
+// ddr: The ddr_s struct containing the configuration information
+// Returns: 0 on success, -1 on failure (device access errors)
+int kernel_set_ddr_config(struct ddr_s *ddr)
+{
 	int fd;
 	ssize_t ret;
 	struct dpf_ddr_config req;
@@ -390,6 +448,7 @@ int kernel_set_ddr_config(struct ddr_s *ddr) {
 	req.header.payload_size = sizeof(struct dpf_ddr_config);
 	req.bar_address = ddr->bar_address;
 	req.cpu_type = ddr->ddr_interface_type;
+	req.num_controllers = ddr->num_ddr_controllers;
 
 	// Open proc interface
 	fd = open(PROC_DEVICE, O_RDWR);
@@ -419,3 +478,4 @@ int kernel_set_ddr_config(struct ddr_s *ddr) {
 
 	return 0;
 }
+

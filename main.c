@@ -600,7 +600,7 @@ int main(int argc, char *argv[])
 				  "kernel\n");
 			return -1;
 		}
-
+		
 		if (core_first != -1 || core_last != -1) {
 			if (kernel_core_range(core_first, core_last) < 0) {
 				loge(TAG, "Failed to configure core range\n");
@@ -608,11 +608,16 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		if (ddr_bw_target != DDR_BW_NOT_SET && ddr_bw_target != DDR_BW_AUTOTEST) {
+		if (ddr_bw_target != DDR_BW_NOT_SET && ddr_bw_target !=
+		DDR_BW_AUTOTEST) {
 			if (kernel_set_ddr_bandwidth(ddr_bw_target) < 0) {
 				loge(TAG, "Failed to set DDR bandwidth\n");
 				return -1;
 			}
+		}
+
+		if (kernel_log_ddr_bw() < 0) {
+			return -1;
 		}
 
 		logi(TAG, "Entering kernel mode tuning, press 'Q' to quit, 'm' "
@@ -635,7 +640,8 @@ int main(int argc, char *argv[])
 					break;
 				} else if (ch == 'm' || ch == 'M') {
 					enable_msr_msg = !enable_msr_msg;
-					logi(TAG, "MSR logging %s\n", enable_msr_msg ? "enabled" : "disabled");
+					logi(TAG,
+					 "MSR logging %s\n", enable_msr_msg ? "enabled" : "disabled");
 				} else if (ch == 'p' || ch == 'P') {
 					enable_pmu_msg = !enable_pmu_msg;
 					logi(TAG, "PMU logging %s\n", enable_pmu_msg ? "enabled" : "disabled");
@@ -650,7 +656,8 @@ int main(int argc, char *argv[])
 					}
 				}
 				if (enable_pmu_msg == 1) {
-					if (kernel_log_pmu_values(core_id) < 0) {
+					if (kernel_log_pmu_values(core_id) < 0) 
+					{
 						loge(TAG, "Error reading PMU values for core %d\n", core_id);
 					}
 				}
@@ -697,4 +704,3 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-

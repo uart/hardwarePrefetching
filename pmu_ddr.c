@@ -120,6 +120,7 @@ int pmu_ddr_init(struct ddr_s *ddr, int kernel_mode)
 				logv(TAG, "PCIe %x: DDR BAR: %x\n",
 					dev->device_id, ddr_bar);
 				ddr_interface_type = DDR_CLIENT;
+				num_ddr_controllers++;
 			break;
 			// GRR SRF DDR controller
 			case 0x3251: // Server platforms config / UBOX
@@ -154,6 +155,7 @@ int pmu_ddr_init(struct ddr_s *ddr, int kernel_mode)
 
 	ddr->ddr_interface_type = ddr_interface_type;
 	ddr->bar_address = ddr_bar;
+	ddr->num_ddr_controllers = num_ddr_controllers;
 
 	// Kernel-space initialization
 	if (kernel_mode != 1) {

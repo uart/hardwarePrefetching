@@ -12,13 +12,16 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include <linux/io.h>
+#include <linux/ioport.h>
 
 #include "kernel_common.h"
 #include "kernel_primitive.h"
 #include "../include/pmu_ddr.h"
+#include "kernel_pmu_ddr.h"
 
 #define TIMER_INTERVAL_SEC 1
-#define PROC_FILE_NAME "dpf_monitor"
+#define PROC_FILE_NAME "dynamicPrefetch"
 #define PROC_BUFFER_SIZE (1024)
 
 static bool keep_running = false;
@@ -27,11 +30,12 @@ static ktime_t kt_period;
 static char *proc_buffer;
 static size_t proc_buffer_size = 0;
 static __u64 ddr_bar_address = 0;
-static __u32 ddr_cpu_type = DDR_NONE;
+ 
 
 static DEFINE_MUTEX(dpf_mutex);
 
 // Configures PMU for a core, sets up performance counters
+// core_id: The CPU core to configure
 static int configure_pmu(int core_id)
 {
 	native_write_msr(0x186, EVENT_MEM_UOPS_RETIRED_ALL_LOADS & 0xFFFFFFFF,
@@ -246,6 +250,7 @@ static int handle_ddrbw_set(struct dpf_ddrbw_set *req_data)
 }
 
 // Handles MSR read request, retrieves MSR values for a core
+// returns 0 on success, -ENOMEM on failure
 static int handle_msr_read(struct dpf_msr_read *req_data)
 {
 	struct dpf_msr_read *req = req_data;
@@ -287,6 +292,7 @@ static int handle_msr_read(struct dpf_msr_read *req_data)
 }
 
 // Handles PMU read request, retrieves PMU counter values for a core
+// returns 0 on success, -ENOMEM on failure
 static int handle_pmu_read(struct dpf_pmu_read *req_data) {
 	struct dpf_pmu_read *req = req_data;
 	struct dpf_resp_pmu_read *resp;
@@ -326,13 +332,28 @@ static int handle_pmu_read(struct dpf_pmu_read *req_data) {
 }
 
 // Handle DDR configuration request
+// returns 0 on success, -ENOMEM on failure
 static int handle_ddr_config(struct dpf_ddr_config *req_data)
 {
 	struct dpf_ddr_config *req = req_data;
 	struct dpf_resp_ddr_config *resp;
+	int ret;
 
 	pr_info("handle_ddr_config: Received BAR=0x%llx, CPU type=%u\n",
 		req->bar_address, req->cpu_type);
+
+	if (req->num_controllers == 0 || req->num_controllers > MAX_NUM_DDR_CONTROLLERS) {
+		pr_err("handle_ddr_config: Invalid controller count %u (max %d)\n",
+		       req->num_controllers, MAX_NUM_DDR_CONTROLLERS);
+		return -EINVAL;
+	}
+
+	// Validate num_controllers
+	if (req->num_controllers == 0 || req->num_controllers > MAX_NUM_DDR_CONTROLLERS) {
+		pr_err("handle_ddr_config: Invalid number of DDR controllers (%u), must be 1 to %d\n",
+		       req->num_controllers, MAX_NUM_DDR_CONTROLLERS);
+		return -EINVAL;
+	}
 
 	resp = kmalloc(sizeof(struct dpf_resp_ddr_config), GFP_KERNEL);
 	if (!resp) {
@@ -340,8 +361,38 @@ static int handle_ddr_config(struct dpf_ddr_config *req_data)
 		return -ENOMEM;
 	}
 
+	// Clean up prior mappings
+	for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
+		if (ddr.mmap[i]) {
+			iounmap((void __iomem *)ddr.mmap[i]);
+			release_mem_region(ddr.bar_address +
+					       (ddr_cpu_type == DDR_CLIENT ? (i == 0 ? CLIENT_DDR0_OFFSET : CLIENT_DDR1_OFFSET) : GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ),
+					   ddr_cpu_type == DDR_CLIENT ? CLIENT_DDR_RANGE : GRR_SRF_DDR_RANGE);
+			ddr.mmap[i] = NULL;
+		}
+	}
+
 	ddr_bar_address = req->bar_address;
 	ddr_cpu_type = req->cpu_type;
+	num_ddr_controllers = req->num_controllers;
+
+	if (ddr_cpu_type == DDR_CLIENT) {
+		pr_info("CLIENT detected\n");
+		ret = kernel_pmu_ddr_init_client(&ddr, ddr_bar_address);
+	} else if (ddr_cpu_type == DDR_GRR_SRF) {
+		pr_info("GRR/SRF detected\n");
+		ret = kernel_pmu_ddr_init_grr_srf(&ddr, ddr_bar_address);
+	} else {
+		pr_err("Unknown DDR type detected (%u)\n", ddr_cpu_type);
+		kfree(resp);
+		return -EINVAL;
+	}
+
+	if (ret < 0) {
+		pr_err("handle_ddr_config: DDR init failed (type %d, ret %d)\n", ddr_cpu_type, ret);
+		kfree(resp);
+		return -EINVAL;
+	}
 
 	resp->header.type = DPF_MSG_DDR_CONFIG;
 	resp->header.payload_size = sizeof(struct dpf_resp_ddr_config);
@@ -359,6 +410,39 @@ static int handle_ddr_config(struct dpf_ddr_config *req_data)
 	return 0;
 }
 
+// Handles DDR bandwidth read request, retrieves read_bw and write_bw
+// returns 0 on success, -ENOMEM on failure
+static int handle_ddr_bw_read(struct dpf_ddr_bw_read *req_data)
+{
+	struct dpf_resp_ddr_bw_read *resp;
+	uint64_t read_bw, write_bw;
+
+	pr_info("handle_ddr_bw_read: Reading DDR bandwidth\n");
+
+	resp = kmalloc(sizeof(struct dpf_resp_ddr_bw_read), GFP_KERNEL);
+	if (!resp) {
+		pr_err("handle_ddr_bw_read: Failed to allocate memory\n");
+		return -ENOMEM;
+	}
+
+	read_ddr_counters(&read_bw, &write_bw);
+
+	resp->header.type = DPF_MSG_DDR_BW_READ;
+	resp->header.payload_size = sizeof(struct dpf_resp_ddr_bw_read);
+	resp->read_bw = read_bw;
+	resp->write_bw = write_bw;
+
+	if (proc_buffer)
+		kfree(proc_buffer);
+	proc_buffer = (char *)resp;
+	proc_buffer_size = sizeof(struct dpf_resp_ddr_bw_read);
+
+	pr_info("handle_ddr_bw_read: Retrieved DDR bandwidth: Read=%llu bytes, Write=%llu bytes\n",
+		read_bw, write_bw);
+	return 0;
+}
+
+// Handles the read request from the user space
 static ssize_t proc_read(struct file *file, char __user *buffer,
 			 size_t count, loff_t *pos)
 {
@@ -377,6 +461,8 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 	return proc_buffer_size;
 }
 
+// Handles the write request from the user space
+// returns 0 on success, -EINVAL on failure
 static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 			      size_t count, loff_t *ppos)
 {
@@ -437,6 +523,9 @@ static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 	case DPF_MSG_DDR_CONFIG:
 		ret = handle_ddr_config(msg_data);
 		break;
+	case DPF_MSG_DDR_BW_READ:
+		ret = handle_ddr_bw_read(msg_data);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -448,12 +537,13 @@ static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 	return ret < 0 ? ret : count;
 }
 
+// proc file operations
 static const struct proc_ops proc_fops = {
     .proc_read = proc_read,
     .proc_write = dpf_proc_write,
 };
 
-
+// Callback function for hrtimer
 static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 {
 	int core_id;
@@ -492,6 +582,7 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 	return HRTIMER_RESTART;
 }
 
+// Module initialization
 static int __init dpf_module_init(void)
 {
 	struct proc_dir_entry *entry;
@@ -523,6 +614,7 @@ static int __init dpf_module_init(void)
 	return 0;
 }
 
+// Module cleanup
 static void __exit dpf_module_exit(void)
 {
 	pr_info("Stopping dPF monitor thread\n");
@@ -532,6 +624,17 @@ static void __exit dpf_module_exit(void)
 
 	remove_proc_entry(PROC_FILE_NAME, NULL);
 	kfree(proc_buffer);
+
+	// Cleanup DDR mappings
+	for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
+		if (ddr.mmap[i]) {
+			iounmap((void __iomem *)ddr.mmap[i]);
+			release_mem_region(ddr.bar_address +
+					       (ddr_cpu_type == DDR_CLIENT ? (i == 0 ? CLIENT_DDR0_OFFSET : CLIENT_DDR1_OFFSET) : GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ),
+					   ddr_cpu_type == DDR_CLIENT ? CLIENT_DDR_RANGE : GRR_SRF_DDR_RANGE);
+			ddr.mmap[i] = NULL;
+		}
+	}
 
 	pr_info("dPF Module Unloaded\n");
 }

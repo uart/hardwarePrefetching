@@ -28,7 +28,7 @@
 #define MAX_NUM_DDR_CONTROLLERS (16)
 
 
-
+//structs for ddr
 struct ddr_s {
 	uint64_t rd_last_update[MAX_NUM_DDR_CONTROLLERS];
 	uint64_t wr_last_update[MAX_NUM_DDR_CONTROLLERS];
@@ -36,6 +36,7 @@ struct ddr_s {
 	int mem_file; //file desc
 	uint64_t bar_address;
 	int ddr_interface_type;
+	int num_ddr_controllers;
 };
 
 int pmu_ddr_init(struct ddr_s *ddr, int kernel_mode);

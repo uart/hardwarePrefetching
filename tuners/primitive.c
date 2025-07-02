@@ -26,7 +26,7 @@
 
 int basicalg(int tunealg)
 {
-	uint64_t ddr_rd_bw; //only used for the first thread
+	uint64_t ddr_rd_bw,ddr_wr_bw;
 	static uint64_t time_now, time_old = 0;
 	float time_delta;
 
@@ -35,12 +35,16 @@ int basicalg(int tunealg)
 	// Grab all PMU data
 	//
 
-	if (!rdt_enabled)
+	if (!rdt_enabled) {
 		ddr_rd_bw = pmu_ddr(&ddr, DDR_PMU_RD);
-	else
+		ddr_wr_bw = pmu_ddr(&ddr, DDR_PMU_WR);
+	} else {
 		ddr_rd_bw = rdt_mbm_bw_get();
+		ddr_wr_bw = rdt_mbm_bw_get();
+	}
 
-	loga(TAG, "DDR RD BW: %ld MB/s\n", ddr_rd_bw/(1024*1024));
+	loga(TAG, "DDR RD BW: %ld MB/s\n", ddr_rd_bw / (1024 * 1024));
+	loga(TAG, "DDR WR BW: %ld MB/s\n", ddr_wr_bw / (1024 * 1024));
 
 	if (time_old == 0) {
 		time_old = time_ms();
@@ -51,10 +55,15 @@ int basicalg(int tunealg)
 	time_delta = (time_now - time_old) / 1000.0;
 	time_old = time_now;
 
-	float ddr_rd_percent = ((float)ddr_rd_bw/(1024*1024))
-			/ (float)ddr_bw_target;
+	float ddr_rd_percent = ((float)ddr_rd_bw / (1024 * 1024)) / (float)ddr_bw_target;
 	ddr_rd_percent /= time_delta;
-	loga(TAG, "Time delta %f, Running at %.1f percent rd bw (%ld MB/s)\n", time_delta, ddr_rd_percent * 100, ddr_rd_bw/(1024*1024));
+
+	loga(TAG, "Time delta %f, Running at %.1f percent rd bw (%ld MB/s)\n", time_delta, ddr_rd_percent * 100, ddr_rd_bw / (1024 * 1024));
+
+	float ddr_wr_percent = ((float)ddr_wr_bw / (1024 * 1024)) / (float)ddr_bw_target;
+	ddr_wr_percent /= time_delta;
+
+	loga(TAG, "Time delta %f, Running at %.1f percent wr bw (%ld MB/s)\n", time_delta, ddr_wr_percent * 100, ddr_wr_bw / (1024 * 1024));
 
 	//	float l2_l3_ddr_hits[ACTIVE_THREADS];
 

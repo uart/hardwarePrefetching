@@ -19,42 +19,43 @@ struct ddr_s ddr = {0};
 static uint64_t kernel_pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 {
 	uint64_t total = 0;
-	uint64_t oldvalue_rd[MAX_NUM_DDR_CONTROLLERS];
-	uint64_t oldvalue_wr[MAX_NUM_DDR_CONTROLLERS];
-	void __iomem *read_addr, *write_addr;
+	void __iomem *addr;
 	int i;
 
-	for (i = 0; i < num_ddr_controllers; i++) {
-		if (!ddr->mmap[i]) {
-			pr_err("Controller %d unmapped, skipping\n", i);
-			continue;
+	if (type == DDR_PMU_RD) {
+		// Handle read counters
+		uint64_t oldvalue_rd;
+
+		for (i = 0; i < num_ddr_controllers; i++) {
+			if (!ddr->mmap[i]) {
+				pr_err("Controller %d unmapped, skipping\n", i);
+				continue;
+			}
+
+			oldvalue_rd = ddr->rd_last_update[i];
+			addr = (void __iomem *)(ddr->mmap[i]);
+			ddr->rd_last_update[i] = readq(addr);
+
+			total += ddr->rd_last_update[i] - oldvalue_rd;
 		}
+	} else if (type == DDR_PMU_WR) {
+		// Handle write counters
+		uint64_t oldvalue_wr;
 
-		oldvalue_rd[i] = ddr->rd_last_update[i];
-		oldvalue_wr[i] = ddr->wr_last_update[i];
+		for (i = 0; i < num_ddr_controllers; i++) {
+			if (!ddr->mmap[i]) {
+				pr_err("Controller %d unmapped, skipping\n", i);
+				continue;
+			}
 
-		read_addr = (void __iomem *)(ddr->mmap[i]);
-		ddr->rd_last_update[i] = readq(read_addr);
-		pr_debug("Controller %d read counter at 0x%p: %llu\n",
-			 i, read_addr, ddr->rd_last_update[i]);
+			oldvalue_wr = ddr->wr_last_update[i];
+			addr = (void __iomem *)(ddr->mmap[i] +
+						(GRR_SRF_FREE_RUN_CNTR_WRITE - GRR_SRF_FREE_RUN_CNTR_READ));
+			ddr->wr_last_update[i] = readq(addr);
 
-		write_addr =
-		    (void __iomem *)(ddr->mmap[i] +
-				     (GRR_SRF_FREE_RUN_CNTR_WRITE -
-				      GRR_SRF_FREE_RUN_CNTR_READ));
-
-		ddr->wr_last_update[i] = readq(write_addr);
-		pr_debug("Controller %d write counter at 0x%p: %llu\n",
-			 i, write_addr, ddr->wr_last_update[i]);
-
-		if (type == DDR_PMU_RD)
-			total += ddr->rd_last_update[i] - oldvalue_rd[i];
-		else
-			total += ddr->wr_last_update[i] - oldvalue_wr[i];
+			total += ddr->wr_last_update[i] - oldvalue_wr;
+		}
 	}
-
-	pr_info("Total %s bandwidth: %llu bytes\n",
-		type == DDR_PMU_RD ? "read" : "write", total * 64);
 
 	return total * 64;
 }
@@ -65,37 +66,45 @@ static uint64_t kernel_pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 {
 	uint64_t total = 0;
-	uint64_t oldvalue_rd[2];
-	uint64_t oldvalue_wr[2];
 	void __iomem *addr;
 	int i;
 
-	pr_info("Reading %s counters for CLIENT (2 controllers)\n",
-		type == DDR_PMU_RD ? "read" : "write");
+	if (type == DDR_PMU_RD) {
+		// Handle read counters
+		uint64_t oldvalue_rd;
 
-	for (i = 0; i < num_ddr_controllers; i++) {
-		if (!ddr->mmap[i]) {
-			pr_err("Controller %d unmapped, skipping\n", i);
-			continue;
+		for (i = 0; i < num_ddr_controllers; i++) {
+			if (!ddr->mmap[i]) {
+				pr_err("Controller %d unmapped, skipping\n", i);
+				continue;
+			}
+
+			oldvalue_rd = ddr->rd_last_update[i];
+			addr = (void __iomem *)(ddr->mmap[i] + CLIENT_DDR_RD_BW);
+			ddr->rd_last_update[i] = readq(addr);
+
+			uint64_t diff = ddr->rd_last_update[i] - oldvalue_rd;
+
+			total += diff;
 		}
+	} else if (type == DDR_PMU_WR) {
+		// Handle write counters
+		uint64_t oldvalue_wr = 0;
 
-		oldvalue_rd[i] = ddr->rd_last_update[i];
-		oldvalue_wr[i] = ddr->wr_last_update[i];
+		for (i = 0; i < num_ddr_controllers; i++) {
+			if (!ddr->mmap[i]) {
+				pr_err("Controller %d unmapped, skipping\n", i);
+				continue;
+			}
 
-		addr = (void __iomem *)(ddr->mmap[i] + CLIENT_DDR_RD_BW);
-		ddr->rd_last_update[i] = readq(addr);
-		pr_debug("Controller %d read counter at 0x%p: %llu\n",
-			 i, addr, ddr->rd_last_update[i]);
+			oldvalue_wr = ddr->wr_last_update[i];
+			addr = (void __iomem *)(ddr->mmap[i] + CLIENT_DDR_WR_BW);
+			ddr->wr_last_update[i] = readq(addr);
 
-		addr = (void __iomem *)(ddr->mmap[i] + CLIENT_DDR_WR_BW);
-		ddr->wr_last_update[i] = readq(addr);
-		pr_debug("Controller %d write counter at 0x%p: %llu\n",
-			 i, addr, ddr->wr_last_update[i]);
+			uint64_t diff = ddr->wr_last_update[i] - oldvalue_wr;
 
-		if (type == DDR_PMU_RD)
-			total += ddr->rd_last_update[i] - oldvalue_rd[i];
-		else
-			total += ddr->wr_last_update[i] - oldvalue_wr[i];
+			total += diff;
+		}
 	}
 
 	return total * 64;
@@ -106,18 +115,12 @@ static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 // Returns: total bandwidth in bytes, or -EINVAL on error
 uint64_t kernel_pmu_ddr(struct ddr_s *ddr, int type)
 {
-	pr_info("kernel_pmu_ddr: Processing %s counter request (type %d)\n",
-		type == DDR_PMU_RD ? "read" : "write", ddr_cpu_type);
-
-	if (ddr_cpu_type == DDR_CLIENT) {
-		pr_info("kernel_pmu_ddr: Handling CLIENT DDR\n");
+	if (ddr_cpu_type == DDR_CLIENT)
 		return kernel_pmu_ddr_client(ddr, type);
-	} else if (ddr_cpu_type == DDR_GRR_SRF) {
-		pr_info("kernel_pmu_ddr: Handling GRR/SRF DDR\n");
+	else if (ddr_cpu_type == DDR_GRR_SRF)
 		return kernel_pmu_ddr_grr_srf(ddr, type);
-	}
 
-	pr_err("kernel_pmu_ddr: Invalid DDR type %d\n", ddr_cpu_type);
+	pr_err("%s: Invalid DDR type %d\n", __func__, ddr_cpu_type);
 
 	return -EINVAL;
 }
@@ -136,9 +139,6 @@ int kernel_pmu_ddr_init_grr_srf(struct ddr_s *ddr, uint64_t ddr_bar)
 		num_ddr_controllers = MAX_NUM_DDR_CONTROLLERS;
 	}
 
-	pr_info("Initializing GRR/SRF DDR with %d controllers, BAR=0x%llx\n",
-		num_ddr_controllers, ddr_bar);
-
 	memset(ddr, 0, sizeof(struct ddr_s));
 	ddr->ddr_interface_type = DDR_GRR_SRF;
 	ddr->bar_address = ddr_bar;
@@ -153,18 +153,13 @@ int kernel_pmu_ddr_init_grr_srf(struct ddr_s *ddr, uint64_t ddr_bar)
 		uint64_t reg_base =
 		    ddr_bar + GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ;
 
-		pr_info("Mapping controller %d at 0x%llx\n", i, reg_base);
-
 		if (!request_mem_region(reg_base, GRR_SRF_DDR_RANGE,
 					"dpf_ddr_server")) {
 			pr_err("Cannot reserve region 0x%llx (size=0x%x)\n",
 			       reg_base, GRR_SRF_DDR_RANGE);
-			struct resource *conflicting =
-			    __request_region(&iomem_resource, reg_base,
-					     GRR_SRF_DDR_RANGE, NULL, 0);
-
-			pr_info("Region 0x%llx used by %s\n",
-				reg_base, conflicting ? conflicting->name : "unknown");
+			/* Unused for now, but keeping region request for debugging purposes */
+			__request_region(&iomem_resource, reg_base,
+					 GRR_SRF_DDR_RANGE, NULL, 0);
 		}
 
 		mapping[i] = ioremap(reg_base, GRR_SRF_DDR_RANGE);
@@ -176,14 +171,10 @@ int kernel_pmu_ddr_init_grr_srf(struct ddr_s *ddr, uint64_t ddr_bar)
 		}
 
 		ddr->mmap[i] = (char *)mapping[i];
-		pr_info("Controller %d mapped: 0x%llx-0x%llx\n",
-			i, reg_base, reg_base + GRR_SRF_DDR_RANGE - 1);
 	}
 
 	kernel_pmu_ddr(ddr, DDR_PMU_RD);
 	kernel_pmu_ddr(ddr, DDR_PMU_WR);
-
-	pr_info("Initialization complete\n");
 
 	return 0;
 
@@ -213,9 +204,6 @@ int kernel_pmu_ddr_init_client(struct ddr_s *ddr, uint64_t ddr_bar)
 	void __iomem *mapping[2] = {NULL};
 	const uint64_t offsets[2] = {CLIENT_DDR0_OFFSET, CLIENT_DDR1_OFFSET};
 
-	pr_info("Initializing CLIENT DDR with 2 controllers, BAR=0x%llx\n",
-		ddr_bar);
-
 	memset(ddr, 0, sizeof(struct ddr_s));
 	ddr->ddr_interface_type = DDR_CLIENT;
 	ddr->bar_address = ddr_bar;
@@ -223,18 +211,13 @@ int kernel_pmu_ddr_init_client(struct ddr_s *ddr, uint64_t ddr_bar)
 	for (i = 0; i < num_ddr_controllers; i++) {
 		uint64_t reg_base = ddr_bar + offsets[i];
 
-		pr_info("Mapping controller %d at 0x%llx\n", i, reg_base);
-
 		if (!request_mem_region(reg_base, CLIENT_DDR_RANGE,
 					"dpf_ddr_client")) {
 			pr_err("Cannot reserve region 0x%llx (size=0x%x)\n",
 			       reg_base, CLIENT_DDR_RANGE);
-			struct resource *conflicting =
-			    __request_region(&iomem_resource, reg_base,
-					     CLIENT_DDR_RANGE, NULL, 0);
-
-			pr_info("Region 0x%llx used by %s\n",
-				reg_base, conflicting ? conflicting->name : "unknown");
+			/* Unused for now, but keeping region request for debugging purposes */
+			__request_region(&iomem_resource, reg_base,
+					 CLIENT_DDR_RANGE, NULL, 0);
 		}
 
 		mapping[i] = ioremap(reg_base, CLIENT_DDR_RANGE);
@@ -246,14 +229,10 @@ int kernel_pmu_ddr_init_client(struct ddr_s *ddr, uint64_t ddr_bar)
 		}
 
 		ddr->mmap[i] = (char *)mapping[i];
-		pr_info("Controller %d mapped: 0x%llx-0x%llx\n",
-			i, reg_base, reg_base + CLIENT_DDR_RANGE - 1);
 	}
 
 	kernel_pmu_ddr(ddr, DDR_PMU_RD);
 	kernel_pmu_ddr(ddr, DDR_PMU_WR);
-
-	pr_info("Initialization complete\n");
 
 	return 0;
 
@@ -278,8 +257,8 @@ cleanup:
 int read_ddr_counters(uint64_t *read_bw, uint64_t *write_bw)
 {
 	if (ddr_cpu_type != DDR_GRR_SRF && ddr_cpu_type != DDR_CLIENT) {
-		pr_err("read_ddr_counters: DDR not initialized (type %d)\n",
-		       ddr_cpu_type);
+		pr_err("%s: DDR not initialized (type %d)\n",
+		       __func__, ddr_cpu_type);
 		*read_bw = 0;
 		*write_bw = 0;
 
@@ -295,6 +274,7 @@ int read_ddr_counters(uint64_t *read_bw, uint64_t *write_bw)
 	}
 
 	*read_bw = kernel_pmu_ddr(&ddr, DDR_PMU_RD);
+
 	*write_bw = kernel_pmu_ddr(&ddr, DDR_PMU_WR);
 
 	if (*read_bw == (uint64_t)-EINVAL || *write_bw == (uint64_t)-EINVAL) {

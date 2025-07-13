@@ -4,6 +4,8 @@
 #include <stdint.h>
 #define PROC_DEVICE "/proc/dynamicPrefetch"
 
+struct ddr_s;
+
 int kernel_mode_init(void);
 int kernel_core_range(uint32_t start, uint32_t end);
 int kernel_set_core_weights(int count, int *core_priority);

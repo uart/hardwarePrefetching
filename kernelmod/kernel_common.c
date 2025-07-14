@@ -5,8 +5,40 @@
 //#include "../include/atom_msr.h"
 #include "kernel_common.h"
 
+int sys_first_core = 0; //set by core_range API
+int sys_active_cores = 0; //set by core_range API
+
 struct core_state_s corestate[MAX_NUM_CORES];
 int ddr_bw_target;
+
+//returns the core index of the first core.
+//use this function and NOT the raw variable
+inline int first_core(void)
+{
+	return sys_first_core;
+}
+
+//returns the number of active cores.
+//use this function and NOT the raw variable
+inline int active_cores(void)
+{
+	return sys_active_cores;
+}
+
+//call with current core_id
+//returns the position within the 4-core module, from 0 to 3
+inline int core_in_module(int core_id)
+{
+	return (core_id - sys_first_core) % 4;
+}
+
+//call with current core_id
+//returns the index of the 4-core module, starting at 0.
+inline int module_id(int core_id)
+{
+	return (core_id - sys_first_core) / 4;
+}
+
 
 //update the pmu field in the corestate struct for the given core.
 // IMPORTANT: This has to be the core with core_id that calls this function or incorrect state will be updated

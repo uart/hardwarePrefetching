@@ -7,10 +7,11 @@
 #define MAX_NUM_CORES (512)
 
 // Hard-coded values for initial testing (e.g., GRR with 24 cores)
-#define FIRST_CORE (6)      // First active core (adjust as needed)
-#define ACTIVE_CORES (8)    // Number of active cores in this test
-#define CORE_IN_MODULE ((core_id - FIRST_CORE) % 4)  // Core index within module
-#define MODULE_ID ((core_id - FIRST_CORE) / 4)       // Module ID for core
+//#define FIRST_CORE (0)      // First active core (adjust as needed)
+//#define ACTIVE_CORES (24)    // Number of active cores in this test
+//#define CORE_IN_MODULE ((core_id - FIRST_CORE) % 4)  // Core index within module
+//#define MODULE_ID ((core_id - FIRST_CORE) / 4)       // Module ID for core
+
 #define DPF_API_VERSION (1)   // API version for user-kernel communication
 
 // PMU counters: 7 total (cycles, instructions, and 5 additional events)
@@ -191,6 +192,14 @@ struct core_state_s {
     int pf_msr_dirty;                  // 0 = no update needed, 1 = update needed
     int core_disabled;                 // 1 = core disabled, 0 = enabled
 };
+
+extern int sys_first_core;
+extern int sys_active_cores;
+
+inline int first_core(void);
+inline int active_cores(void);
+inline int core_in_module(int core_id);
+inline int module_id(int core_id);
 
 // External declarations
 extern struct core_state_s corestate[MAX_NUM_CORES];

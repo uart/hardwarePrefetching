@@ -8,8 +8,8 @@
 #include "kernel_primitive.h"
 #include "kernel_pmu_ddr.h"
 
-//only tunealg 0 is supported at this time
-int kernel_basicalg(int tunealg)
+//Only tunealg 1 is supported at this time
+int kernel_basicalg(int tunealg, int aggr)
 {
 	uint64_t ddr_rd_bw,ddr_wr_bw; //only used for the first thread
 	uint64_t time_now, time_old = 0;
@@ -43,10 +43,10 @@ int kernel_basicalg(int tunealg)
 	int core_contr_to_ddr[MAX_NUM_CORES];
 	int total_ddr_hit = 0;
 
-	for (int i = 0; i < ACTIVE_CORES; i++)
+	for (int i = 0; i < active_cores(); i++)
 		total_ddr_hit += corestate[i].pmu_result[3];
 
-	for (int i = 0; i < ACTIVE_CORES; i++) {
+	for (int i = 0; i < active_cores(); i++) {
 		l2_hitr[i] = corestate[i].pmu_result[1] / corestate[i].pmu_result[1]
 			+ corestate[i].pmu_result[2]	+ corestate[i].pmu_result[3];
 
@@ -71,9 +71,9 @@ int kernel_basicalg(int tunealg)
 	// All cores are set the same at this time
 	//
 
-	if (tunealg == 0) {
+	if (tunealg == 1) {
 
-		for (int i = 0; i < ACTIVE_CORES; i++) {
+		for (int i = 0; i < active_cores(); i++) {
 			int l2xq = msr_get_l2xq(i);
 
 			int old_l2xq = l2xq;

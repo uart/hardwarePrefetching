@@ -34,6 +34,10 @@ static __u64 ddr_bar_address;
 static DEFINE_MUTEX(dpf_mutex);
 static cpumask_t enabled_cpus;
 
+// Global tuning algorithm settings, these should be set through the dpf_tuning_control API.
+int tune_alg;
+int aggr;
+
 // Configures PMU for a core, sets up performance counters
 // core_id: The CPU core to configure
 static void configure_pmu_on_core(void *info)
@@ -121,6 +125,8 @@ static int handle_core_range(struct dpf_core_range *req_data)
 	struct dpf_resp_core_range *resp;
 	int core_id;
 
+	//TODO: ADD RANGE CHECKS!
+
 	pr_info("%s: Received core range request: start=%d, end=%d\n",
 	       __func__, req->core_start, req->core_end);
 
@@ -133,6 +139,9 @@ static int handle_core_range(struct dpf_core_range *req_data)
 	resp->core_start = req->core_start;
 	resp->core_end = req->core_end;
 	resp->thread_count = req->core_end - req->core_start + 1;
+
+	sys_first_core = req->core_start;
+	sys_active_cores = (req->core_end + 1) - req->core_start;
 
 	for (core_id = 0; core_id < MAX_NUM_CORES; core_id++) {
 		corestate[core_id].core_disabled =
@@ -207,11 +216,15 @@ static int handle_tuning(struct dpf_req_tuning *req_data)
 	resp->header.payload_size = sizeof(struct dpf_resp_tuning);
 	resp->status = req->enable;
 
+	// These two should be set through the API call, now we just hard-code them
+	tune_alg = 1;
+	aggr = 1;
+
 	if (req->enable == 1) {
 		// Load current Prefetch MSR settings for enabled
 		// cores before starting tuning
 		for_each_online_cpu(core_id) {
-			if (corestate[core_id].core_disabled == 0 && CORE_IN_MODULE == 0) {
+			if (corestate[core_id].core_disabled == 0 && core_in_module(core_id) == 0) {
 				msr_load(core_id);
 				pr_info("Loaded MSR for core %d\n", core_id);
 			}
@@ -544,12 +557,21 @@ static void per_core_work(void *info)
 	// Get the ID of the current CPU core
 	int core_id = smp_processor_id();
 
+	pr_info("Core %d tuning\n", core_id);
+
 	if (corestate[core_id].core_disabled == 0) {
 		pmu_update(core_id);
-		if (core_id == FIRST_CORE)
-			kernel_basicalg(0);
-		if (CORE_IN_MODULE == 0 && is_msr_dirty(core_id) == 1)
+
+		if (core_id == first_core()) {
+			pr_info("First Core - run alg %d\n", tune_alg);
+
+			if(tune_alg == 1)kernel_basicalg(tune_alg, aggr);
+		}
+		if (core_in_module(core_id) == 0 && is_msr_dirty(core_id) == 1) {
+			pr_info("Core %d update MSR\n", core_id);
+
 			msr_update(core_id);
+		}
 	}
 }
 
@@ -559,7 +581,11 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 	if (!keep_running)
 		return HRTIMER_NORESTART;
 
+	pr_info("HRTimer\n");
+
 	if (!cpumask_empty(&enabled_cpus)) {
+		pr_info("Error: this does not execute...!\n");
+
 		smp_call_function_many(&enabled_cpus, per_core_work,
 				       NULL, false);
 	}

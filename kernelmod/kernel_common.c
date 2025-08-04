@@ -11,34 +11,6 @@ int sys_active_cores = 0; //set by core_range API
 struct core_state_s corestate[MAX_NUM_CORES];
 int ddr_bw_target;
 
-//returns the core index of the first core.
-//use this function and NOT the raw variable
-inline int first_core(void)
-{
-	return sys_first_core;
-}
-
-//returns the number of active cores.
-//use this function and NOT the raw variable
-inline int active_cores(void)
-{
-	return sys_active_cores;
-}
-
-//call with current core_id
-//returns the position within the 4-core module, from 0 to 3
-inline int core_in_module(int core_id)
-{
-	return (core_id - sys_first_core) % 4;
-}
-
-//call with current core_id
-//returns the index of the 4-core module, starting at 0.
-inline int module_id(int core_id)
-{
-	return (core_id - sys_first_core) / 4;
-}
-
 
 //update the pmu field in the corestate struct for the given core.
 // IMPORTANT: This has to be the core with core_id that calls this function or incorrect state will be updated
@@ -51,7 +23,8 @@ int pmu_update(int core_id)
 	// Update PMU counters using the defined indices from kernel_common.h
 	corestate[core_id].pmu_result[PERF_MEM_UOPS_RETIRED_ALL_LOADS] = native_read_pmc(0);	 // PMC0
 	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] = native_read_pmc(1);	 // PMC1
-	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] = native_read_pmc(2);	 // PMC2
+	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] = 
+	native_read_pmc(2);	 // PMC2
 	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT] = native_read_pmc(3); // PMC3
 	corestate[core_id].pmu_result[PERF_XQ_PROMOTION_ALL] = native_read_pmc(4);		 // PMC4
 	corestate[core_id].pmu_result[PERF_CPU_CLK_UNHALTED_THREAD] = native_read_pmc(5);	 // PMC5

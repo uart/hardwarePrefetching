@@ -16,7 +16,7 @@
                         
 
 
-struct dpf_console_sysinfo {
+struct dpf_console_sysinfo_s {
     int is_hybrid;
     int first_core;
     int last_core;
@@ -28,6 +28,6 @@ struct dpf_console_sysinfo {
     int theoretical_bw; 
 };
 
-int collect_sysinfo(struct dpf_console_sysinfo *out);
+int collect_sysinfo(struct dpf_console_sysinfo_s *out);
 
 #endif

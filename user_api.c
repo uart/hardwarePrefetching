@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "kernelmod/kernel_common.h"
+#include "kernelmod/kernel_api.h"
 #include "log.h"
 #include "pcie.h"
 #include "pmu_ddr.h"
@@ -20,8 +21,8 @@
 int kernel_mode_init(void)
 {
 	int fd;
-	struct dpf_req_init req;
-	struct dpf_resp_init resp;
+	struct dpf_req_init_s req;
+	struct dpf_resp_init_s resp;
 	ssize_t ret;
 
 	// Open proc interface
@@ -33,7 +34,7 @@ int kernel_mode_init(void)
 
 	// Prepare init request
 	req.header.type = DPF_MSG_INIT;
-	req.header.payload_size = sizeof(struct dpf_req_init);
+	req.header.payload_size = sizeof(struct dpf_req_init_s);
 
 	// Send request
 	ret = write(fd, &req, sizeof(req));
@@ -64,8 +65,8 @@ int kernel_core_range(uint32_t start, uint32_t end)
 	int fd;
 	ssize_t ret;
 
-	struct dpf_core_range req;
-	struct dpf_resp_core_range resp;
+	struct dpf_core_range_s req;
+	struct dpf_resp_core_range_s resp;
 
 	req.header.type = DPF_MSG_CORE_RANGE;
 	req.header.payload_size = sizeof(req);
@@ -109,11 +110,11 @@ int kernel_set_core_weights(int count, int *core_priority)
 		return -1;
 	}
 
-	size_t req_size = sizeof(struct dpf_core_weight) + count * sizeof(uint32_t);
-	size_t resp_size = sizeof(struct dpf_resp_core_weight) + count * sizeof(uint32_t);
+	size_t req_size = sizeof(struct dpf_core_weight_s) + count * sizeof(uint32_t);
+	size_t resp_size = sizeof(struct dpf_resp_core_weight_s) + count * sizeof(uint32_t);
 
-	struct dpf_core_weight *req = malloc(req_size);
-	struct dpf_resp_core_weight *resp = malloc(resp_size);
+	struct dpf_core_weight_s *req = malloc(req_size);
+	struct dpf_resp_core_weight_s *resp = malloc(resp_size);
 
 	if (!req || !resp) {
 		loge(TAG, "Memory allocation failed\n");
@@ -170,12 +171,12 @@ int kernel_set_ddr_bandwidth(uint32_t bandwidth)
 {
 	int fd;
 	ssize_t ret;
-	struct dpf_ddrbw_set req;
-	struct dpf_resp_ddrbw_set resp;
+	struct dpf_ddrbw_set_s req;
+	struct dpf_resp_ddrbw_set_s resp;
 
 	// Prepare DDR bandwidth request
 	req.header.type = DPF_MSG_DDRBW_SET;
-	req.header.payload_size = sizeof(struct dpf_ddrbw_set);
+	req.header.payload_size = sizeof(struct dpf_ddrbw_set_s);
 	req.set_value = bandwidth;
 
 	// Open proc interface
@@ -209,18 +210,33 @@ int kernel_set_ddr_bandwidth(uint32_t bandwidth)
 
 // Controls the tuning status of the API
 // accept tuning_status: Enable (1) or disable (0)
+// tunealg: The tuning algorithm to use
+// aggr_factor: Aggressiveness factor (0.0 to 5.0), scaled by 10 in kernel
 // Returns: 0 on success, -1 on failure (device access errors)
-int kernel_tuning_control(uint32_t tuning_status)
+int kernel_tuning_control(uint32_t tuning_status, uint32_t tunealg, float aggr_factor)
 {
 	int fd;
 	ssize_t ret;
 
-	struct dpf_req_tuning req;
-	struct dpf_resp_tuning resp;
+	struct dpf_req_tuning_s req;
+	struct dpf_resp_tuning_s resp;
+
+	uint32_t aggr_scaled;
+
+	// Validate aggressiveness factor range
+	if (aggr_factor < 0.0f || aggr_factor > 5.0f) {
+		loge(TAG, "Aggressiveness factor out of range (0.0-5.0): %.1f\n", aggr_factor);
+		return -1;
+	}
+
+	// Scale aggressiveness factor by 10 for kernel (0.1 -> 1, 1.0 -> 10, 5.0 -> 50)
+	aggr_scaled = (uint32_t)(aggr_factor * 10.0f);
 
 	req.header.type = DPF_MSG_TUNING;
 	req.header.payload_size = sizeof(req);
 	req.enable = tuning_status;
+	req.tunealg = tunealg;
+	req.aggr = aggr_scaled;
 
 	fd = open(PROC_DEVICE, O_RDWR);
 	if (fd < 0) {
@@ -240,7 +256,8 @@ int kernel_tuning_control(uint32_t tuning_status)
 		return -1;
 	}
 
-	logd(TAG, "Tuning status: %u\n", resp.status);
+	logd(TAG, "Tuning status: %u, Algorithm: %u, Aggressiveness: %u\n", 
+	     resp.status, resp.confirmed_tunealg, resp.confirmed_aggr);
 
 	close(fd);
 
@@ -254,11 +271,11 @@ int kernel_msr_read(uint32_t core_id, uint64_t *msr_values)
 {
 	int fd;
 	ssize_t ret;
-	struct dpf_msr_read req;
-	struct dpf_resp_msr_read resp;
+	struct dpf_msr_read_s req;
+	struct dpf_resp_msr_read_s resp;
 
 	req.header.type = DPF_MSG_MSR_READ;
-	req.header.payload_size = sizeof(struct dpf_msr_read);
+	req.header.payload_size = sizeof(struct dpf_msr_read_s);
 	req.core_id = core_id;
 
 	fd = open(PROC_DEVICE, O_RDWR);
@@ -294,11 +311,11 @@ int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values)
 {
 	int fd;
 	ssize_t ret;
-	struct dpf_pmu_read req;
-	struct dpf_resp_pmu_read resp;
+	struct dpf_pmu_read_s req;
+	struct dpf_resp_pmu_read_s resp;
 
 	req.header.type = DPF_MSG_PMU_READ;
-	req.header.payload_size = sizeof(struct dpf_pmu_read);
+	req.header.payload_size = sizeof(struct dpf_pmu_read_s);
 	req.core_id = core_id;
 
 	fd = open(PROC_DEVICE, O_RDWR);
@@ -334,11 +351,11 @@ int kernel_ddr_bw_read(uint64_t *read_bw, uint64_t *write_bw)
 {
 	int fd;
 	ssize_t ret;
-	struct dpf_ddr_bw_read req;
-	struct dpf_resp_ddr_bw_read resp;
+	struct dpf_ddr_bw_read_s req;
+	struct dpf_resp_ddr_bw_read_s resp;
 
 	req.header.type = DPF_MSG_DDR_BW_READ;
-	req.header.payload_size = sizeof(struct dpf_ddr_bw_read);
+	req.header.payload_size = sizeof(struct dpf_ddr_bw_read_s);
 
 	fd = open(PROC_DEVICE, O_RDWR);
 	if (fd < 0) {
@@ -435,8 +452,8 @@ int kernel_set_ddr_config(struct ddr_s *ddr)
 {
 	int fd;
 	ssize_t ret;
-	struct dpf_ddr_config req;
-	struct dpf_resp_ddr_config resp;
+	struct dpf_ddr_config_s req;
+	struct dpf_resp_ddr_config_s resp;
 
 	if (ddr->ddr_interface_type == DDR_NONE) {
 		loge(TAG, "Failed to detect DDR configuration\n");
@@ -445,7 +462,7 @@ int kernel_set_ddr_config(struct ddr_s *ddr)
 
 	// Prepare DDR config request
 	req.header.type = DPF_MSG_DDR_CONFIG;
-	req.header.payload_size = sizeof(struct dpf_ddr_config);
+	req.header.payload_size = sizeof(struct dpf_ddr_config_s);
 	req.bar_address = ddr->bar_address;
 	req.cpu_type = ddr->ddr_interface_type;
 	req.num_controllers = ddr->num_ddr_controllers;

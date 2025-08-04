@@ -20,8 +20,8 @@ WINDOW *header_win;
 WINDOW *main_win;
 WINDOW *titlebar_win;
 
-struct dpf_console_snapshot snapshot;
-struct dpf_console_sysinfo sysinfo;
+struct dpf_console_snapshot_s snapshot;
+struct dpf_console_sysinfo_s sysinfo;
 
 // Detect CPU core topology
 // Sets global core_first/core_last to efficient core range

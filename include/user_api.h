@@ -10,7 +10,7 @@ int kernel_mode_init(void);
 int kernel_core_range(uint32_t start, uint32_t end);
 int kernel_set_core_weights(int count, int *core_priority);
 int kernel_set_ddr_bandwidth(uint32_t bandwidth);
-int kernel_tuning_control(uint32_t tuning_status);
+int kernel_tuning_control(uint32_t tuning_status, uint32_t tunealg, float aggr_factor);
 int kernel_msr_read(uint32_t core_id, uint64_t *msr_values);
 int kernel_pmu_read(uint32_t core_id, uint64_t *pmu_values);
 int kernel_msr_read(uint32_t core_id, uint64_t *msr_values);

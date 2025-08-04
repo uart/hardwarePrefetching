@@ -20,19 +20,20 @@
 #include "kernel_common.h"
 #include "kernel_pmu_ddr.h"
 #include "kernel_primitive.h"
+#include "kernel_api.h"
 
 #define TIMER_INTERVAL_SEC 1
 #define PROC_FILE_NAME "dynamicPrefetch"
 #define PROC_BUFFER_SIZE (1024)
 
-static bool keep_running;
-static struct hrtimer monitor_timer;
-static ktime_t kt_period;
-static char *proc_buffer;
-static size_t proc_buffer_size;
-static __u64 ddr_bar_address;
+bool keep_running;
+struct hrtimer monitor_timer;
+ktime_t kt_period;
+char *proc_buffer;
+size_t proc_buffer_size;
+__u64 ddr_bar_address;
 static DEFINE_MUTEX(dpf_mutex);
-static cpumask_t enabled_cpus;
+cpumask_t enabled_cpus;
 
 // Global tuning algorithm settings, these should be set through the dpf_tuning_control API.
 int tune_alg;
@@ -44,32 +45,38 @@ static void configure_pmu_on_core(void *info)
 {
 
 	// Configure Performance Event Select registers (PERFEVTSELx MSRs)
-	native_write_msr(0x186, EVENT_MEM_UOPS_RETIRED_ALL_LOADS & 0xFFFFFFFF,
-			 EVENT_MEM_UOPS_RETIRED_ALL_LOADS >> 32);
-	native_write_msr(0x187, EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT & 0xFFFFFFFF,
-			 EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT >> 32);
-	native_write_msr(0x188, EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT & 0xFFFFFFFF,
-			 EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT >> 32);
-	native_write_msr(0x189,
-			 EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT & 0xFFFFFFFF,
-			 EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT >> 32);
-	native_write_msr(0x18A, EVENT_XQ_PROMOTION_ALL & 0xFFFFFFFF,
-			 EVENT_XQ_PROMOTION_ALL >> 32);
-	native_write_msr(0x18B, EVENT_CPU_CLK_UNHALTED_THREAD & 0xFFFFFFFF,
-			 EVENT_CPU_CLK_UNHALTED_THREAD >> 32);
-	native_write_msr(0x18C, EVENT_INST_RETIRED_ANY_P & 0xFFFFFFFF,
-			 EVENT_INST_RETIRED_ANY_P >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL0,
+		EVENT_MEM_UOPS_RETIRED_ALL_LOADS & MSR_LOW_MASK,
+		EVENT_MEM_UOPS_RETIRED_ALL_LOADS >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL1,
+		EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT & MSR_LOW_MASK,
+		EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL2,
+		EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT & MSR_LOW_MASK,
+		EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL3,
+		EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT & MSR_LOW_MASK,
+		EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL4,
+		EVENT_XQ_PROMOTION_ALL & MSR_LOW_MASK,
+		EVENT_XQ_PROMOTION_ALL >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL5,
+		EVENT_CPU_CLK_UNHALTED_THREAD & MSR_LOW_MASK,
+		EVENT_CPU_CLK_UNHALTED_THREAD >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL6,
+		EVENT_INST_RETIRED_ANY_P & MSR_LOW_MASK,
+		EVENT_INST_RETIRED_ANY_P >> 32);
 
 	// Reset the performance counter control register first
-	native_write_msr(0x38D, 0, 0); // Clear IA32_PERF_GLOBAL_CTRL
+	native_write_msr(MSR_IA32_PERF_GLOBAL_STATUS, 0, 0); // Clear performance counters status
 
 	// Enable PMC0-6
-	native_write_msr(0x38F, 0x7F, 0);
+	native_write_msr(MSR_IA32_PERF_GLOBAL_CTRL, PMC_ENABLE_ALL, 0);
 }
 
 // Configures PMU for a core, sets up performance counters
 // core_id: The CPU core to configure
-static int configure_pmu(int core_id)
+int configure_pmu(int core_id)
 {
 	cpumask_t *target_cpu;
 	int ret = 0;
@@ -90,366 +97,6 @@ static int configure_pmu(int core_id)
 	return ret;
 }
 
-// Handle initialization request and response to the user space
-// Arguments: None
-// Returns: 0 on success, -ENOMEM on failure
-static int handle_init(void)
-{
-	struct dpf_resp_init *resp;
-
-	resp = kmalloc(sizeof(struct dpf_resp_init), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_INIT;
-	resp->header.payload_size = sizeof(struct dpf_resp_init);
-	resp->version = DPF_API_VERSION;
-
-	kfree(proc_buffer);
-
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_init);
-
-	pr_info("%s: Initialized with version %d\n",
-	       __func__, resp->version);
-
-	return 0;
-}
-
-// Handle core range configuration request and response to the user space
-// It accepts a request to specify the range of cores to monitor
-// returns 0 on success, -ENOMEM on failure
-static int handle_core_range(struct dpf_core_range *req_data)
-{
-	struct dpf_core_range *req = req_data;
-	struct dpf_resp_core_range *resp;
-	int core_id;
-
-	//TODO: ADD RANGE CHECKS!
-
-	pr_info("%s: Received core range request: start=%d, end=%d\n",
-	       __func__, req->core_start, req->core_end);
-
-	resp = kmalloc(sizeof(struct dpf_resp_core_range), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_CORE_RANGE;
-	resp->header.payload_size = sizeof(struct dpf_resp_core_range);
-	resp->core_start = req->core_start;
-	resp->core_end = req->core_end;
-	resp->thread_count = req->core_end - req->core_start + 1;
-
-	sys_first_core = req->core_start;
-	sys_active_cores = (req->core_end + 1) - req->core_start;
-
-	for (core_id = 0; core_id < MAX_NUM_CORES; core_id++) {
-		corestate[core_id].core_disabled =
-		    (core_id < req->core_start || core_id > req->core_end);
-		if (!corestate[core_id].core_disabled)
-			configure_pmu(core_id);
-	}
-
-	kfree(proc_buffer);
-
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_core_range);
-
-	pr_info("%s: Processed core range request: start=%d, end=%d, thread_count=%d\n",
-	       __func__, resp->core_start, resp->core_end, resp->thread_count);
-
-	return 0;
-}
-
-// Handle core weight configuration request and response to the user space
-// It accepts a request to specify the weight of each core
-// returns 0 on success, -ENOMEM on failure
-static int handle_core_weight(void *req_data)
-{
-	struct dpf_core_weight *req = req_data;
-	struct dpf_resp_core_weight *resp;
-	size_t resp_size;
-
-	if (!req_data)
-		return -EINVAL;
-
-	pr_info("%s: Received core weight request with count=%d\n",
-	       __func__, req->count);
-
-	resp_size = sizeof(struct dpf_resp_core_weight) + req->count *
-							      sizeof(__u32);
-	resp = kmalloc(resp_size, GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_CORE_WEIGHT;
-	resp->header.payload_size = resp_size;
-	resp->count = req->count;
-	memcpy(resp->confirmed_weights, req->weights,
-	       req->count * sizeof(__u32));
-
-	kfree(proc_buffer);
-
-	proc_buffer = (char *)resp;
-	proc_buffer_size = resp_size;
-
-	pr_info("%s: Processed core weight request with count=%d\n",
-	       __func__, resp->count);
-
-	return 0;
-}
-
-// Handle tuning request and response to the user space
-// It accepts a request to enable or disable the monitoring
-// returns 0 on success, -ENOMEM on failure
-static int handle_tuning(struct dpf_req_tuning *req_data)
-{
-	struct dpf_req_tuning *req = req_data;
-	struct dpf_resp_tuning *resp;
-	int core_id;
-
-	resp = kmalloc(sizeof(struct dpf_resp_tuning), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_TUNING;
-	resp->header.payload_size = sizeof(struct dpf_resp_tuning);
-	resp->status = req->enable;
-
-	// These two should be set through the API call, now we just hard-code them
-	tune_alg = 1;
-	aggr = 1;
-
-	if (req->enable == 1) {
-		// Load current Prefetch MSR settings for enabled
-		// cores before starting tuning
-		for_each_online_cpu(core_id) {
-			if (corestate[core_id].core_disabled == 0 && core_in_module(core_id) == 0) {
-				msr_load(core_id);
-				pr_info("Loaded MSR for core %d\n", core_id);
-			}
-		}
-		keep_running = true;
-		hrtimer_start(&monitor_timer, kt_period, HRTIMER_MODE_REL);
-		pr_info("Monitoring enabled\n");
-	} else {
-		keep_running = false;
-		hrtimer_cancel(&monitor_timer);
-		pr_info("Monitoring disabled\n");
-	}
-
-	kfree(proc_buffer);
-
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_tuning);
-
-	return 0;
-}
-
-// Handle DDR bandwidth set request and response to the user space
-// It accepts a request to set the DDR bandwidth target
-// returns 0 on success, -ENOMEM on failure
-static int handle_ddrbw_set(struct dpf_ddrbw_set *req_data)
-{
-	struct dpf_ddrbw_set *req = req_data;
-	struct dpf_resp_ddrbw_set *resp;
-
-	pr_info("Received request with value=%u\n", req->set_value);
-
-	resp = kmalloc(sizeof(struct dpf_resp_ddrbw_set), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_DDRBW_SET;
-	resp->header.payload_size = sizeof(struct dpf_resp_ddrbw_set);
-	resp->confirmed_value = req->set_value;
-
-	ddr_bw_target = req->set_value;
-
-	kfree(proc_buffer);
-
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_ddrbw_set);
-
-	pr_info("DDR bandwidth target set to %u MB/s\n", ddr_bw_target);
-
-	return 0;
-}
-
-// Handles MSR read request, retrieves MSR values for a core
-// returns 0 on success, -ENOMEM on failure
-static int handle_msr_read(struct dpf_msr_read *req_data)
-{
-	struct dpf_msr_read *req = req_data;
-	struct dpf_resp_msr_read *resp;
-
-	pr_info("Received request for core %u\n", req->core_id);
-
-	if (req->core_id >= MAX_NUM_CORES ||
-	    corestate[req->core_id].core_disabled) {
-		pr_err("Invalid or disabled core %u\n", req->core_id);
-		return -EINVAL;
-	}
-
-	resp = kmalloc(sizeof(struct dpf_resp_msr_read), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_MSR_READ;
-	resp->header.payload_size = sizeof(struct dpf_resp_msr_read);
-
-	if (corestate[req->core_id].pf_msr[MSR_1320_INDEX].v == 0)
-		msr_load(req->core_id);
-
-	for (int i = 0; i < NR_OF_MSR; i++)
-		resp->msr_values[i] = corestate[req->core_id].pf_msr[i].v;
-
-	kfree(proc_buffer);
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_msr_read);
-
-	pr_info("MSR values retrieved for core %u\n", req->core_id);
-	return 0;
-}
-
-// Handles PMU read request, retrieves PMU counter values for a core
-// returns 0 on success, -ENOMEM on failure
-static int handle_pmu_read(struct dpf_pmu_read *req_data)
-{
-	struct dpf_pmu_read *req = req_data;
-	struct dpf_resp_pmu_read *resp;
-
-	pr_info("Received request for core %u\n", req->core_id);
-
-	if (req->core_id >= MAX_NUM_CORES || corestate[req->core_id].core_disabled) {
-		pr_err("Invalid or disabled core %u\n", req->core_id);
-		return -EINVAL;
-	}
-
-	resp = kmalloc(sizeof(struct dpf_resp_pmu_read), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	resp->header.type = DPF_MSG_PMU_READ;
-	resp->header.payload_size = sizeof(struct dpf_resp_pmu_read);
-
-	pmu_update(req->core_id);
-
-	for (int i = 0; i < PMU_COUNTERS; i++) {
-		resp->pmu_values[i] = corestate[req->core_id].pmu_result[i];
-		pr_debug("PMU %d for core %d: %llu\n", i, req->core_id,
-			 resp->pmu_values[i]);
-	}
-
-	kfree(proc_buffer);
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_pmu_read);
-
-	pr_info("PMU values retrieved for core %u\n", req->core_id);
-	return 0;
-}
-
-// Handle DDR configuration request
-// returns 0 on success, -ENOMEM on failure
-static int handle_ddr_config(struct dpf_ddr_config *req_data)
-{
-	struct dpf_ddr_config *req = req_data;
-	struct dpf_resp_ddr_config *resp;
-	int ret;
-
-	pr_info("Received BAR=0x%llx, CPU type=%u\n", req->bar_address, req->cpu_type);
-
-	if (req->num_controllers == 0 || req->num_controllers > MAX_NUM_DDR_CONTROLLERS) {
-		pr_err("Invalid controller count %u (max %d)\n", req->num_controllers, MAX_NUM_DDR_CONTROLLERS);
-		return -EINVAL;
-	}
-
-	// Validate num_controllers
-	if (req->num_controllers == 0 || req->num_controllers > MAX_NUM_DDR_CONTROLLERS) {
-		pr_err("Invalid number of DDR controllers (%u), must be 1 to %d\n", req->num_controllers, MAX_NUM_DDR_CONTROLLERS);
-		return -EINVAL;
-	}
-
-	resp = kmalloc(sizeof(struct dpf_resp_ddr_config), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	// Clean up prior mappings
-	for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
-		if (ddr.mmap[i]) {
-			iounmap((void __iomem *)ddr.mmap[i]);
-			release_mem_region(ddr.bar_address +
-					       (ddr_cpu_type == DDR_CLIENT ? (i == 0 ? CLIENT_DDR0_OFFSET : CLIENT_DDR1_OFFSET) : GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ),
-					       ddr_cpu_type == DDR_CLIENT ? CLIENT_DDR_RANGE : GRR_SRF_DDR_RANGE);
-			ddr.mmap[i] = NULL;
-		}
-	}
-
-	ddr_bar_address = req->bar_address;
-	ddr_cpu_type = req->cpu_type;
-	num_ddr_controllers = req->num_controllers;
-
-	if (ddr_cpu_type == DDR_CLIENT) {
-		pr_info("CLIENT detected\n");
-		ret = kernel_pmu_ddr_init_client(&ddr, ddr_bar_address);
-	} else if (ddr_cpu_type == DDR_GRR_SRF) {
-		pr_info("GRR/SRF detected\n");
-		ret = kernel_pmu_ddr_init_grr_srf(&ddr, ddr_bar_address);
-	} else {
-		pr_err("Unknown DDR type detected (%u)\n", ddr_cpu_type);
-		kfree(resp);
-		return -EINVAL;
-	}
-
-	if (ret < 0) {
-		pr_err("DDR init failed (type %d, ret %d)\n", ddr_cpu_type, ret);
-		kfree(resp);
-		return -EINVAL;
-	}
-
-	resp->header.type = DPF_MSG_DDR_CONFIG;
-	resp->header.payload_size = sizeof(struct dpf_resp_ddr_config);
-	resp->confirmed_bar = ddr_bar_address;
-	resp->confirmed_type = ddr_cpu_type;
-
-	kfree(proc_buffer);
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_ddr_config);
-
-	pr_info("%s: DDR config set - BAR=0x%llx, Type=%u\n",
-	       __func__, ddr_bar_address, ddr_cpu_type);
-
-	return 0;
-}
-
-// Handles DDR bandwidth read request, retrieves read_bw and write_bw
-// returns 0 on success, -ENOMEM on failure
-static int handle_ddr_bw_read(struct dpf_ddr_bw_read *req_data)
-{
-	struct dpf_resp_ddr_bw_read *resp;
-	uint64_t read_bw, write_bw;
-
-	pr_info("%s: Reading DDR bandwidth\n", __func__);
-
-	resp = kmalloc(sizeof(struct dpf_resp_ddr_bw_read), GFP_KERNEL);
-	if (!resp)
-		return -ENOMEM;
-
-	read_ddr_counters(&read_bw, &write_bw);
-
-	resp->header.type = DPF_MSG_DDR_BW_READ;
-	resp->header.payload_size = sizeof(struct dpf_resp_ddr_bw_read);
-	resp->read_bw = read_bw;
-	resp->write_bw = write_bw;
-
-	kfree(proc_buffer);
-	proc_buffer = (char *)resp;
-	proc_buffer_size = sizeof(struct dpf_resp_ddr_bw_read);
-
-	pr_info("%s: Retrieved DDR bandwidth: Read=%llu bytes, Write=%llu bytes\n",
-	       __func__, resp->read_bw, resp->write_bw);
-	return 0;
-}
 
 // Handles the read request from the user space
 static ssize_t proc_read(struct file *file, char __user *buffer,
@@ -474,11 +121,11 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 			      size_t count, loff_t *ppos)
 {
-	struct dpf_msg_header header;
+	struct dpf_msg_header_s header;
 	void *msg_data = NULL;
 	int ret = -EINVAL;
 
-	if (count < sizeof(struct dpf_msg_header) || count > MAX_MSG_SIZE)
+	if (count < sizeof(struct dpf_msg_header_s) || count > MAX_MSG_SIZE)
 		return -EINVAL;
 
 	mutex_lock(&dpf_mutex);
@@ -506,31 +153,31 @@ static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 
 	switch (header.type) {
 	case DPF_MSG_INIT:
-		ret = handle_init();
+		ret = api_init();
 		break;
 	case DPF_MSG_CORE_RANGE:
-		ret = handle_core_range(msg_data);
+		ret = api_core_range(msg_data);
 		break;
 	case DPF_MSG_CORE_WEIGHT:
-		ret = handle_core_weight(msg_data);
+		ret = api_core_weight(msg_data);
 		break;
 	case DPF_MSG_TUNING:
-		ret = handle_tuning(msg_data);
+		ret = api_tuning(msg_data);
 		break;
 	case DPF_MSG_DDRBW_SET:
-		ret = handle_ddrbw_set(msg_data);
+		ret = api_ddrbw_set(msg_data);
 		break;
 	case DPF_MSG_PMU_READ:
-		ret = handle_pmu_read(msg_data);
+		ret = api_pmu_read(msg_data);
 		break;
 	case DPF_MSG_MSR_READ:
-		ret = handle_msr_read(msg_data);
+		ret = api_msr_read(msg_data);
 		break;
 	case DPF_MSG_DDR_CONFIG:
-		ret = handle_ddr_config(msg_data);
+		ret = api_ddr_config(msg_data);
 		break;
 	case DPF_MSG_DDR_BW_READ:
-		ret = handle_ddr_bw_read(msg_data);
+		ret = api_ddr_bw_read(msg_data);
 		break;
 	default:
 		ret = -EINVAL;
@@ -581,14 +228,11 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 	if (!keep_running)
 		return HRTIMER_NORESTART;
 
-	pr_info("HRTimer\n");
-
 	if (!cpumask_empty(&enabled_cpus)) {
-		pr_info("Error: this does not execute...!\n");
-
+		pr_info("Enabling smp_call_function_many\n");
 		smp_call_function_many(&enabled_cpus, per_core_work,
-				       NULL, false);
-	}
+					NULL, false);
+	} 
 
 	hrtimer_forward_now(timer, kt_period);
 	return HRTIMER_RESTART;
@@ -602,7 +246,7 @@ static int __init dpf_module_init(void)
 
 	pr_info("dPF Module Loaded\n");
 
-	for (core_id = 0; core_id < MAX_CORES; core_id++)
+	for (core_id = 0; core_id < MAX_NUM_CORES; core_id++)
 		corestate[core_id].core_disabled = 1;
 
 	proc_buffer = kmalloc(PROC_BUFFER_SIZE, GFP_KERNEL);

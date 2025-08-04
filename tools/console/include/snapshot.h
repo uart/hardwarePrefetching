@@ -23,7 +23,7 @@ struct core_metrics {
 
 // hold all core and system metrics
 // including PMU and MSR values
-struct dpf_console_snapshot {
+struct dpf_console_snapshot_s {
 	struct core_metrics cores[MAX_CORES];
 	int core_count;
 
@@ -34,6 +34,6 @@ struct dpf_console_snapshot {
 };
 
 // populates the snapshot struct with all core and system metrics
-int update_console_snapshot(struct dpf_console_snapshot *snapshot);
+int update_console_snapshot(struct dpf_console_snapshot_s *snapshot);
 
 #endif /* __SNAPSHOT_H */

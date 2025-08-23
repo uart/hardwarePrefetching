@@ -3,6 +3,16 @@
 #include <linux/errno.h>
 #include <linux/types.h>
 #include <linux/cpumask.h>
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
+
+// Global variables for PMU logging
+char *pmu_log_buffer = NULL;
+size_t pmu_log_buffer_size = 0;
+size_t pmu_log_data_size = 0;
+bool pmu_logging_active = false;
+
+#define TIMER_INTERVAL_SEC 1
 #include <linux/io.h>
 #include <linux/ioport.h>
 
@@ -439,3 +449,307 @@ int api_ddr_bw_read(struct dpf_ddr_bw_read_s *req_data)
 	       __func__, resp->read_bw, resp->write_bw);
 	return 0;
 }
+
+
+
+
+// Handle PMU logging control request
+// It initializes or configures PMU metrics logging with options for buffer size and mode
+// returns 0 on success, negative error code on failure
+int api_pmu_log_control(struct dpf_pmu_log_control_s *req_data)
+{
+	struct dpf_pmu_log_control_s *req = req_data;
+	struct dpf_resp_pmu_log_control_s *resp;
+	size_t requested_buffer_size;
+	char *new_buffer = NULL;
+	__u32 mode;
+	__s32 status = 0;
+
+	pr_info("%s: Received PMU log control request: buffer_size=%u, mode=%u\n",
+	       __func__, req->buffer_size, req->mode);
+
+	resp = kmalloc(sizeof(struct dpf_resp_pmu_log_control_s), GFP_KERNEL);
+	if (!resp)
+		return -ENOMEM;
+
+	// Process request parameters
+	requested_buffer_size = req->buffer_size;
+	mode = req->mode;
+
+	// Validate mode (0=reset, 1=append)
+	if (mode > 1) {
+		pr_err("%s: Invalid mode %u, must be 0 (reset) or 1 (append)\n", 
+		       __func__, mode);
+		kfree(resp);
+		return -EINVAL;
+	}
+
+	// For the first time or reset mode, allocate or reallocate the buffer
+	if (!pmu_log_buffer || mode == 0) {
+		// Free existing buffer if any
+		if (pmu_log_buffer) {
+			kfree(pmu_log_buffer);
+			pmu_log_buffer = NULL;
+		}
+
+		// Allocate new buffer
+		if (requested_buffer_size > 0) {
+			new_buffer = kmalloc(requested_buffer_size, GFP_KERNEL);
+			if (!new_buffer) {
+				pr_err("%s: Failed to allocate %zu bytes for PMU log buffer\n",
+				       __func__, requested_buffer_size);
+				kfree(resp);
+				return -ENOMEM;
+			}
+			memset(new_buffer, 0, requested_buffer_size);
+			pmu_log_buffer = new_buffer;
+			pmu_log_buffer_size = requested_buffer_size;
+			pmu_log_data_size = 0; // Reset data size for new buffer
+		} else {
+			// Zero buffer size is invalid
+			pr_err("%s: Buffer size must be greater than zero\n", __func__);
+			kfree(resp);
+			return -EINVAL;
+		}
+	} else if (mode == 0 && pmu_log_buffer) {
+		// Reset mode with existing buffer, just reset data size
+		pmu_log_data_size = 0;
+	}
+
+	// Initialize PMU counters on all cores
+	if (mode == 0 || !pmu_logging_active) {
+		// Reset core states
+		for (int i = 0; i < MAX_NUM_CORES; i++) {
+			if (corestate[i].core_disabled == 0) {
+				// Initialize PMU counters
+				memset(corestate[i].pmu_result, 0, sizeof(corestate[i].pmu_result));
+				// Enable PMU monitoring
+				configure_pmu(i);
+			}
+		}
+	}
+
+	// Start monitoring timer if not already running
+	if (!keep_running) {
+		keep_running = true;
+		kt_period = ktime_set(0, TIMER_INTERVAL_SEC * NSEC_PER_SEC);
+		hrtimer_start(&monitor_timer, kt_period, HRTIMER_MODE_REL);
+	}
+
+	// Enable logging
+	pmu_logging_active = true;
+
+	// Prepare response
+	resp->header.type = DPF_MSG_PMU_LOG_CONTROL;
+	resp->header.payload_size = sizeof(struct dpf_resp_pmu_log_control_s);
+	resp->confirmed_buffer_size = pmu_log_buffer_size;
+	resp->confirmed_mode = mode;
+	resp->status = status;
+
+	// Set response in proc buffer
+	kfree(proc_buffer);
+	proc_buffer = (char *)resp;
+	proc_buffer_size = sizeof(struct dpf_resp_pmu_log_control_s);
+
+	pr_info("%s: PMU logging %s with buffer size %zu bytes\n",
+	       __func__, (mode == 0) ? "reset" : "configured", pmu_log_buffer_size);
+
+	return 0;
+}
+
+// Handle PMU logging stop request
+// Stops or pauses the ongoing PMU metrics logging session
+// returns 0 on success, negative error code on failure
+int api_pmu_log_stop(struct dpf_pmu_log_stop_s *req_data)
+{
+	struct dpf_resp_pmu_log_stop_s *resp;
+	__s32 status = 0;
+
+	pr_info("%s: Received PMU log stop request\n", __func__);
+
+	resp = kmalloc(sizeof(struct dpf_resp_pmu_log_stop_s), GFP_KERNEL);
+	if (!resp)
+		return -ENOMEM;
+
+	// Check if logging is already stopped
+	if (!pmu_logging_active) {
+		pr_info("%s: PMU logging already stopped\n", __func__);
+		resp->status = -EINVAL;
+		goto cleanup;
+	}
+
+	// Disable logging
+	pmu_logging_active = false;
+
+	// Stop monitoring timer
+	keep_running = false;
+	if (hrtimer_active(&monitor_timer)) {
+		hrtimer_cancel(&monitor_timer);
+	}
+
+	// Disable PMU counters on all cores
+	for (int i = 0; i < MAX_NUM_CORES; i++) {
+		if (corestate[i].core_disabled == 0) {
+			// Disable PMU monitoring
+			configure_pmu(i);
+		}
+	}
+
+	// Prepare response
+	resp->header.type = DPF_MSG_PMU_LOG_STOP;
+	resp->header.payload_size = sizeof(struct dpf_resp_pmu_log_stop_s);
+	resp->status = status;
+
+	// Set response in proc buffer
+	kfree(proc_buffer);
+	proc_buffer = (char *)resp;
+	proc_buffer_size = sizeof(struct dpf_resp_pmu_log_stop_s);
+
+	pr_info("%s: PMU logging stopped\n", __func__);
+
+	return 0;
+
+cleanup:
+	kfree(resp);
+	resp = kmalloc(sizeof(struct dpf_resp_pmu_log_stop_s), GFP_KERNEL);
+	if (!resp)
+		return -ENOMEM;
+	resp->header.type = DPF_MSG_PMU_LOG_STOP;
+	resp->header.payload_size = sizeof(struct dpf_resp_pmu_log_stop_s);
+	resp->status = -EINVAL;
+	kfree(proc_buffer);
+	proc_buffer = (char *)resp;
+	proc_buffer_size = sizeof(struct dpf_resp_pmu_log_stop_s);
+	return -EINVAL;
+}
+
+// Handle PMU log read request
+// Reads the contents of the PMU metrics buffer
+// returns 0 on success, negative error code on failure
+int api_pmu_log_read(struct dpf_pmu_log_read_s *req_data)
+{
+	struct dpf_pmu_log_read_s *req = req_data;
+	struct dpf_resp_pmu_log_read_s *resp = NULL;
+	__u32 max_bytes;
+	__u64 bytes_to_read = 0;
+	size_t resp_size;
+
+	pr_info("%s: Received PMU log read request: max_bytes=%u\n",
+	       __func__, req ? req->max_bytes : 0);
+
+	// Check if buffer exists
+	if (!pmu_log_buffer || pmu_log_buffer_size == 0) {
+		pr_err("%s: PMU log buffer not allocated\n", __func__);
+		return -ENODATA;
+	}
+
+	// Check if we have data
+	if (pmu_log_data_size == 0) {
+		pr_info("%s: PMU log buffer is empty\n", __func__);
+		// Return success but with zero data size
+		resp_size = sizeof(struct dpf_resp_pmu_log_read_s);
+		resp = kmalloc(resp_size, GFP_KERNEL);
+		if (!resp) {
+			pr_err("%s: Failed to allocate empty response buffer\n", __func__);
+			return -ENOMEM;
+		}
+		resp->header.type = DPF_MSG_PMU_LOG_READ;
+		resp->header.payload_size = resp_size;
+		resp->data_size = 0;
+		
+		kfree(proc_buffer);
+		proc_buffer = (char *)resp;
+		proc_buffer_size = resp_size;
+		return 0;
+	}
+
+	// Determine how much data to read
+	max_bytes = req ? req->max_bytes : 0;
+	if (max_bytes == 0) {
+		// If max_bytes is 0, read all available data
+		bytes_to_read = pmu_log_data_size;
+	} else {
+		// Otherwise, read up to max_bytes
+		bytes_to_read = min_t(__u64, max_bytes, pmu_log_data_size);
+	}
+
+	// Calculate response size including flexible array
+	resp_size = sizeof(struct dpf_resp_pmu_log_read_s) + bytes_to_read;
+
+	// Allocate response with enough space for data
+	resp = kmalloc(resp_size, GFP_KERNEL);
+	if (!resp) {
+		pr_err("%s: Failed to allocate response buffer of size %zu\n", 
+		       __func__, resp_size);
+		return -ENOMEM;
+	}
+
+	// Prepare response header
+	memset(resp, 0, resp_size);
+	resp->header.type = DPF_MSG_PMU_LOG_READ;
+	resp->header.payload_size = resp_size;
+	resp->data_size = bytes_to_read;
+
+	// Copy data if any
+	if (bytes_to_read > 0) {
+		memcpy(resp->data, pmu_log_buffer, bytes_to_read);
+		pr_info("%s: Copied %llu bytes of PMU data to response (first entry: core=%u, ts=%llu)\n", 
+		       __func__, bytes_to_read, 
+		       ((dpf_pmu_log_entry_t *)resp->data)->core_id,
+		       ((dpf_pmu_log_entry_t *)resp->data)->timestamp);
+	} else {
+		pr_info("%s: No data to copy (bytes_to_read=%llu)\n", 
+		       __func__, bytes_to_read);
+	}
+
+	// Set response in proc buffer
+	kfree(proc_buffer);
+	proc_buffer = (char *)resp;
+	proc_buffer_size = resp_size;
+
+	pr_info("%s: Read %llu/%zu bytes from PMU log buffer\n", 
+	       __func__, bytes_to_read, pmu_log_data_size);
+
+	return 0;
+}
+
+// Function to append data to the PMU log buffer
+// Called during monitoring to collect PMU metrics
+int api_pmu_log_append_data(void *data, size_t data_size)
+{
+	// Check if logging is enabled and buffer exists
+	if (!pmu_logging_active) {
+		pr_debug("%s: PMU logging not active\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!pmu_log_buffer || pmu_log_buffer_size == 0) {
+		pr_err("%s: PMU log buffer not initialized\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!data || data_size == 0) {
+		pr_err("%s: Invalid data or data size\n", __func__);
+		return -EINVAL;
+	}
+
+	// Check if there's enough space in the buffer
+	if (pmu_log_data_size + data_size > pmu_log_buffer_size) {
+		pr_warn("%s: PMU log buffer full (%zu + %zu > %zu), dropping data\n",
+		       __func__, pmu_log_data_size, data_size, pmu_log_buffer_size);
+		return -ENOSPC;
+	}
+
+	// Debug: Print first few bytes of the data being appended
+	dpf_pmu_log_entry_t *entry = (dpf_pmu_log_entry_t *)data;
+	pr_debug("%s: Appending %zu bytes (core %u, ts %llu)\n",
+	       __func__, data_size, entry->core_id, entry->timestamp);
+
+	// Append data to buffer
+	memcpy(pmu_log_buffer + pmu_log_data_size, data, data_size);
+	pmu_log_data_size += data_size;
+
+	pr_debug("%s: New buffer size: %zu bytes\n", __func__, pmu_log_data_size);
+	return 0;
+}
+

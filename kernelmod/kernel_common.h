@@ -41,6 +41,15 @@
 #define MSR_LOW_MASK                0xFFFFFFFF  // Mask for low 32 bits
 #define PMC_ENABLE_ALL              0x7F        // Enable PMC0-6
 
+// PMU log entry structure - shared between kernel and user space
+typedef struct {
+    __u64 timestamp;                // Timestamp in nanoseconds
+    __u32 core_id;                  // CPU core ID
+    __u64 pmu_values[PMU_COUNTERS]; // PMU counter values
+} __attribute__((packed)) dpf_pmu_log_entry_t;
+
+#define PMU_ENTRY_SIZE_BYTES sizeof(dpf_pmu_log_entry_t)
+
 // Event types for PMU configuration (64-bit event codes including config bits)
 #define EVENT_CPU_CLK_UNHALTED_THREAD       (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
 #define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c2ULL) // Event 0x00, UMask 0xc2, Enable
@@ -78,7 +87,10 @@ enum dpf_msg_type {
 	DPF_MSG_MSR_READ = 5,	 // Read MSR values
 	DPF_MSG_PMU_READ = 6,	 // Read PMU values
 	DPF_MSG_DDR_CONFIG = 7,   // DDR configuration
-	DPF_MSG_DDR_BW_READ = 8	 //DDR BW READ
+	DPF_MSG_DDR_BW_READ = 8,	 //DDR BW READ
+	DPF_MSG_PMU_LOG_CONTROL = 9, // PMU logging control
+	DPF_MSG_PMU_LOG_STOP = 10,   // Stop PMU logging
+	DPF_MSG_PMU_LOG_READ = 11    // Read PMU log buffer
 };
 
 // Note: Struct definitions have been moved to kernel_api.h
@@ -102,6 +114,12 @@ struct dpf_ddr_config_s;
 struct dpf_resp_ddr_config_s;
 struct dpf_ddr_bw_read_s;
 struct dpf_resp_ddr_bw_read_s;
+struct dpf_pmu_log_control_s;
+struct dpf_resp_pmu_log_control_s;
+struct dpf_pmu_log_stop_s;
+struct dpf_resp_pmu_log_stop_s;
+struct dpf_pmu_log_read_s;
+struct dpf_resp_pmu_log_read_s;
 
 // Core state structure
 struct core_state_s {

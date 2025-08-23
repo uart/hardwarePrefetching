@@ -1,6 +1,9 @@
 #ifndef __KERNEL_API_H__
 #define __KERNEL_API_H__
 
+#include <linux/types.h>
+
+
 // Forward declarations and constants needed for the API structures
 #define PMU_COUNTERS (7)
 #define NR_OF_MSR (6)
@@ -134,10 +137,57 @@ struct dpf_resp_ddr_bw_read_s {
 	uint64_t write_bw;
 };
 
+
+// Request structure for PMU logging control
+struct dpf_pmu_log_control_s {
+	struct dpf_msg_header_s header;
+	__u32 buffer_size;   // Size of the kernel buffer in bytes
+	__u32 mode;         // 0 for Reset mode, 1 for Append mode
+};
+
+// Response structure for PMU logging control
+struct dpf_resp_pmu_log_control_s {
+	struct dpf_msg_header_s header;
+	__u32 confirmed_buffer_size;  // The actual buffer size allocated
+	__u32 confirmed_mode;        // The logging mode applied
+	__s32 status;               // Success (0) or error code
+};
+
+// Request structure for stopping PMU logging
+struct dpf_pmu_log_stop_s {
+	struct dpf_msg_header_s header;
+};
+
+// Response structure for stopping PMU logging
+struct dpf_resp_pmu_log_stop_s {
+	struct dpf_msg_header_s header;
+	__s32 status;               // Success (0) or error code
+};
+
+// Request structure for reading PMU log buffer
+struct dpf_pmu_log_read_s {
+	struct dpf_msg_header_s header;
+	__u32 max_bytes;    // Maximum number of bytes to read (0 for all)
+};
+
+// Response structure for reading PMU log buffer
+struct dpf_resp_pmu_log_read_s {
+	struct dpf_msg_header_s header;
+	__u64 data_size;    // Number of bytes of PMU metrics data
+	__u8 data[];        // Flexible array for the actual PMU metrics data
+};
+
+
 // Global tuning algorithm settings, these should be set through
 // the dpf_tuning_control API.
 extern int tune_alg;
 extern int aggr;
+
+// PMU logging state
+extern bool pmu_logging_active;
+extern char *pmu_log_buffer;
+extern size_t pmu_log_buffer_size;
+extern size_t pmu_log_data_size;
 
 // Kernel API function prototypes
 int api_init(void);
@@ -149,5 +199,8 @@ int api_msr_read(struct dpf_msr_read_s *req_data);
 int api_pmu_read(struct dpf_pmu_read_s *req_data);
 int api_ddr_config(struct dpf_ddr_config_s *req_data);
 int api_ddr_bw_read(struct dpf_ddr_bw_read_s *req_data);
-
+int api_pmu_log_control(struct dpf_pmu_log_control_s *req_data);
+int api_pmu_log_stop(struct dpf_pmu_log_stop_s *req_data);
+int api_pmu_log_read(struct dpf_pmu_log_read_s *req_data);
+int api_pmu_log_append_data(void *data, size_t data_size);
 #endif // __KERNEL_API_H__

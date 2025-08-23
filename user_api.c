@@ -1,12 +1,13 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "kernelmod/kernel_common.h"
 #include "kernelmod/kernel_api.h"
+#include "kernelmod/kernel_common.h"
 #include "log.h"
 #include "pcie.h"
 #include "pmu_ddr.h"
@@ -14,6 +15,165 @@
 
 #define TAG "KERNEL_API"
 #define PROC_DEVICE "/proc/dynamicPrefetch"
+
+// PMU logging mode constants
+#define PMU_LOG_MODE_RESET 0
+#define PMU_LOG_MODE_APPEND 1
+
+
+
+// Starts PMU event logging with the specified buffer size
+// buffer_size: Size of the buffer to allocate for logging
+// reset: If non-zero, resets the log buffer before starting
+// Returns: 0 on success, -1 on failure
+int kernel_pmu_log_start(size_t buffer_size, int reset)
+{
+	int fd;
+	ssize_t ret;
+	struct dpf_pmu_log_control_s req;
+	struct dpf_resp_pmu_log_control_s resp;
+
+	req.header.type = DPF_MSG_PMU_LOG_CONTROL;
+	req.header.payload_size = sizeof(struct dpf_pmu_log_control_s);
+	req.buffer_size = buffer_size;
+	req.mode = reset;
+
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open device file for PMU log control\n");
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write PMU log control request\n");
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, &resp, sizeof(resp));
+	if (ret < 0) {
+		loge(TAG, "Failed to read PMU log control response\n");
+		close(fd);
+		return -1;
+	}
+
+	close(fd);
+	return 0;
+}
+
+
+// Stops PMU event logging
+// Returns: 0 on success, -1 on failure
+int kernel_pmu_log_stop(void)
+{
+	int fd;
+	ssize_t ret;
+	struct dpf_pmu_log_stop_s req;
+	struct dpf_resp_pmu_log_stop_s resp;
+
+	req.header.type = DPF_MSG_PMU_LOG_STOP;
+	req.header.payload_size = sizeof(struct dpf_pmu_log_stop_s);
+
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open device file for PMU log stop\n");
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write PMU log stop request\n");
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, &resp, sizeof(resp));
+	if (ret < 0) {
+		loge(TAG, "Failed to read PMU log stop response\n");
+		close(fd);
+		return -1;
+	}
+
+	close(fd);
+	return 0;
+}
+
+// Reads logged PMU events into the provided buffer
+// buffer: Pointer to buffer where the log data will be stored
+// max_bytes: Maximum number of bytes that can be written to the buffer
+// bytes_read: Output parameter that receives the actual number of bytes read
+// Returns: 0 on success, -1 on failure
+
+int kernel_pmu_log_read(char *buffer, size_t max_bytes, uint64_t *bytes_read)
+{
+	int fd;
+	ssize_t ret;
+	struct dpf_pmu_log_read_s req;
+	struct dpf_resp_pmu_log_read_s *resp = NULL; // Pointer to response
+	size_t resp_size;
+
+	req.header.type = DPF_MSG_PMU_LOG_READ;
+	req.header.payload_size = sizeof(struct dpf_pmu_log_read_s);
+	req.max_bytes = max_bytes;
+
+	fd = open(PROC_DEVICE, O_RDWR);
+	if (fd < 0) {
+		loge(TAG, "Failed to open device file for PMU log read\n");
+		return -1;
+	}
+
+	ret = write(fd, &req, sizeof(req));
+	if (ret < 0) {
+		loge(TAG, "Failed to write PMU log read request\n");
+		close(fd);
+		return -1;
+	}
+
+	// First read the header and fixed part of response
+	resp = malloc(sizeof(struct dpf_resp_pmu_log_read_s));
+	if (!resp) {
+		loge(TAG, "Failed to allocate response buffer\n");
+		close(fd);
+		return -1;
+	}
+
+	ret = read(fd, resp, sizeof(struct dpf_resp_pmu_log_read_s));
+	if (ret < 0) {
+		loge(TAG, "Failed to read PMU log response header\n");
+		free(resp);
+		close(fd);
+		return -1;
+	}
+
+	// Calculate total response size including data
+	resp_size = sizeof(struct dpf_resp_pmu_log_read_s) + resp->data_size;
+
+	// Reallocate buffer to include data
+	resp = realloc(resp, resp_size);
+	if (!resp) {
+		loge(TAG, "Failed to reallocate response buffer\n");
+		close(fd);
+		return -1;
+	}
+
+	// Read the remaining data
+	ret = read(fd, resp->data, resp->data_size);
+	if (ret < 0) {
+		loge(TAG, "Failed to read PMU log data\n");
+		free(resp);
+		close(fd);
+		return -1;
+	}
+
+	// Copy data to user buffer
+	*bytes_read = resp->data_size;
+	memcpy(buffer, resp->data, resp->data_size);
+
+	free(resp);
+	close(fd);
+	return 0;
+}
 
 // Initializes the kernel mode interface for hardware prefetching
 // Arguments: No arguments.
@@ -155,7 +315,7 @@ int kernel_set_core_weights(int count, int *core_priority)
 	logd(TAG, "Confirmed Core weights set:\n");
 	for (int i = 0; i < count; i++)
 		logd(TAG, "Core %u: priority %u\n", i,
-			resp->confirmed_weights[i]);
+		     resp->confirmed_weights[i]);
 
 	close(fd);
 	free(req);
@@ -256,7 +416,7 @@ int kernel_tuning_control(uint32_t tuning_status, uint32_t tunealg, float aggr_f
 		return -1;
 	}
 
-	logd(TAG, "Tuning status: %u, Algorithm: %u, Aggressiveness: %u\n", 
+	logd(TAG, "Tuning status: %u, Algorithm: %u, Aggressiveness: %u\n",
 	     resp.status, resp.confirmed_tunealg, resp.confirmed_aggr);
 
 	close(fd);
@@ -495,4 +655,3 @@ int kernel_set_ddr_config(struct ddr_s *ddr)
 
 	return 0;
 }
-

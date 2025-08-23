@@ -19,4 +19,9 @@ int kernel_log_msr_values(uint32_t core_id);
 int kernel_log_pmu_values(uint32_t core_id);
 int kernel_set_ddr_config(struct ddr_s *ddr);
 int kernel_log_ddr_bw();
+
+// PMU logging functions
+int kernel_pmu_log_start(size_t buffer_size, int reset);
+int kernel_pmu_log_stop(void);
+int kernel_pmu_log_read(char *buffer, size_t max_bytes, uint64_t *bytes_read);
 #endif /* __USER_API_H */

@@ -1,5 +1,5 @@
 obj-m += dpf.o
-dpf-objs := kernel_dpf.o kernel_common.o kernel_primitive.o kernel_pmu_ddr.o
+dpf-objs := kernel_dpf.o kernel_common.o kernel_primitive.o kernel_pmu_ddr.o kernel_api.o
 
 PWD := $(CURDIR)
 

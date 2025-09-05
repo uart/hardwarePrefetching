@@ -7,9 +7,9 @@
 #include "tuning.h"
 
 // populate the snapshot struct with all core and system metrics
-// accepts a pointer to a dpf_console_snapshot struct
+// accepts a pointer to a dpf_console_snapshot_s struct
 // returns 0 on success, -1 on failure
-int update_console_snapshot(struct dpf_console_snapshot *snapshot)
+int update_console_snapshot(struct dpf_console_snapshot_s *snapshot)
 {
 	enum tuning_state_t tuning_state;
 	struct core_metrics *core_data;

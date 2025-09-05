@@ -620,10 +620,16 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 
-		logi(TAG, "Entering kernel mode tuning, press 'Q' to quit, 'm' "
-			  "to toggle MSR logging, 'p' to toggle PMU logging\n");
+		logi(TAG, "*** KERNEL MODE TUNING STARTED ***\n");
+		logi(TAG, "Available controls during tuning:\n");
+		logi(TAG, "  'Q' - Quit and exit tuning mode\n");
+		logi(TAG, "  'M' - Toggle MSR (Model-Specific Register) logging\n");
+		logi(TAG, "  'P' - Toggle PMU (Performance Monitoring Unit) logging\n\n");
 
-		if (kernel_tuning_control(1) < 0)
+		logi(TAG, "Starting kernel mode tuning with algorithm %d and aggressiveness %.1f\n", 
+		     tunealg, aggr);
+
+		if (kernel_tuning_control(1, tunealg, aggr) < 0)
 			return -1;
 
 		struct termios oldt, newt;
@@ -669,7 +675,7 @@ int main(int argc, char *argv[])
 
 		tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 
-		if (kernel_tuning_control(0) < 0)
+		if (kernel_tuning_control(0, tunealg, aggr) < 0)
 			return -1;
 		logi(TAG, "Leaving kernel mode tuning - exiting dPF\n");
 		pcie_deinit();

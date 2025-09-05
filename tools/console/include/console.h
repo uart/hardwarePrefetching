@@ -11,8 +11,8 @@ extern int current_view;	// 0=PMU view, 1=MSR view
 extern int core_first;
 extern int core_last;
 
-extern struct dpf_console_snapshot snapshot;
-extern struct dpf_console_sysinfo sysinfo;
+extern struct dpf_console_snapshot_s snapshot;
+extern struct dpf_console_sysinfo_s sysinfo;
 
 // NCurses windows
 extern WINDOW *header_win;	// System info window

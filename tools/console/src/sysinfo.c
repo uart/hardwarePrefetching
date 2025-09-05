@@ -49,9 +49,9 @@ static int get_hybridflag(void)
 }
 
 // collect system information and fill the provided struct
-// accepts a pointer to a dpf_console_sysinfo struct for output
+// accepts a pointer to a dpf_console_sysinfo_s struct for output
 // returns 0 on success, -1 on failure
-int collect_sysinfo(struct dpf_console_sysinfo *out)
+int collect_sysinfo(struct dpf_console_sysinfo_s *out)
 {
 	struct e_cores_layout_s cores; // efficient core IDs
 	struct ddr_s ddr_config;

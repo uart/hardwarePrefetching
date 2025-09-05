@@ -26,6 +26,30 @@
 #define MSR_1324_INDEX (4)  // Index for MSR 0x1324
 #define MSR_1A4_INDEX (5)   // Index for MSR 0x1A4 (miscellaneous features)
 
+// MSR register addresses for PMU configuration
+#define MSR_IA32_PERFEVTSEL0        0x186
+#define MSR_IA32_PERFEVTSEL1        0x187
+#define MSR_IA32_PERFEVTSEL2        0x188
+#define MSR_IA32_PERFEVTSEL3        0x189
+#define MSR_IA32_PERFEVTSEL4        0x18A
+#define MSR_IA32_PERFEVTSEL5        0x18B
+#define MSR_IA32_PERFEVTSEL6        0x18C
+#define MSR_IA32_PERF_GLOBAL_STATUS 0x38D
+#define MSR_IA32_PERF_GLOBAL_CTRL   0x38F
+
+// MSR masks and controls
+#define MSR_LOW_MASK                0xFFFFFFFF  // Mask for low 32 bits
+#define PMC_ENABLE_ALL              0x7F        // Enable PMC0-6
+
+// PMU log entry structure - shared between kernel and user space
+typedef struct {
+    __u64 timestamp;                // Timestamp in nanoseconds
+    __u32 core_id;                  // CPU core ID
+    __u64 pmu_values[PMU_COUNTERS]; // PMU counter values
+} __attribute__((packed)) dpf_pmu_log_entry_t;
+
+#define PMU_ENTRY_SIZE_BYTES sizeof(dpf_pmu_log_entry_t)
+
 // Event types for PMU configuration (64-bit event codes including config bits)
 #define EVENT_CPU_CLK_UNHALTED_THREAD       (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
 #define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c2ULL) // Event 0x00, UMask 0xc2, Enable
@@ -50,6 +74,8 @@ enum pmu_metrics {
 #define MAX_MSG_SIZE (1024) // Maximum size of a message
 #define MAX_CORES (64)      // Maximum number of CPU cores (for procfs or user-space limits)
 #define MAX_WEIGHT (100)    // Maximum weight value for core priority
+#define MIN_AGGR (0)        // Minimum aggressiveness factor
+#define MAX_AGGR (100)      // Maximum aggressiveness factor
 
 // Enum for message types between user space and kernel module
 enum dpf_msg_type {
@@ -61,129 +87,39 @@ enum dpf_msg_type {
 	DPF_MSG_MSR_READ = 5,	 // Read MSR values
 	DPF_MSG_PMU_READ = 6,	 // Read PMU values
 	DPF_MSG_DDR_CONFIG = 7,   // DDR configuration
-	DPF_MSG_DDR_BW_READ = 8	 //DDR BW READ
+	DPF_MSG_DDR_BW_READ = 8,	 //DDR BW READ
+	DPF_MSG_PMU_LOG_CONTROL = 9, // PMU logging control
+	DPF_MSG_PMU_LOG_STOP = 10,   // Stop PMU logging
+	DPF_MSG_PMU_LOG_READ = 11    // Read PMU log buffer
 };
 
-// Common message header
-struct dpf_msg_header {
-    __u32 type;         // Message type (from dpf_msg_type)
-    __u32 payload_size; // Size of payload following the header
-};
-
-// Request structure for API version
-struct dpf_req_init {
-    struct dpf_msg_header header;
-};
-
-// Response structure for API version
-struct dpf_resp_init {
-    struct dpf_msg_header header;
-    __u32 version;      // Returned API version
-};
-
-// Request structure for core range
-struct dpf_core_range {
-    struct dpf_msg_header header;
-    __u32 core_start;   // First core in range
-    __u32 core_end;     // Last core in range
-};
-
-// Response structure for core range
-struct dpf_resp_core_range {
-    struct dpf_msg_header header;
-    __u32 core_start;   // Confirmed first core
-    __u32 core_end;     // Confirmed last core
-    __u32 thread_count; // Number of threads (cores) in range
-};
-
-// Request structure for core weights
-struct dpf_core_weight {
-    struct dpf_msg_header header;
-    __u32 count;        // Number of weights
-    __u32 weights[];    // Flexible array of core weights
-};
-
-// Response structure for core weights
-struct dpf_resp_core_weight {
-    struct dpf_msg_header header;
-    __u32 count;            // Number of confirmed weights
-    __u32 confirmed_weights[]; // Flexible array of confirmed weights
-};
-
-// Request structure for tuning
-struct dpf_req_tuning {
-    struct dpf_msg_header header;
-    __u32 enable;       // Enable tuning (non-zero) or disable (0)
-};
-
-// Response structure for tuning
-struct dpf_resp_tuning {
-    struct dpf_msg_header header;
-    __u32 status;       // Tuning status (e.g., enabled/disabled)
-};
-
-// Request structure for DDR bandwidth setting
-struct dpf_ddrbw_set {
-    struct dpf_msg_header header;
-    __u32 set_value;    // DDR bandwidth value to set (MB/s)
-};
-
-// Response structure for DDR bandwidth setting
-struct dpf_resp_ddrbw_set {
-    struct dpf_msg_header header;
-    __u32 confirmed_value; // Confirmed DDR bandwidth value
-};
-
-// Request structure for MSR read
-struct dpf_msr_read {
-    struct dpf_msg_header header;
-    __u32 core_id;      // Core ID to read MSRs from
-};
-
-// Response structure for MSR read
-struct dpf_resp_msr_read {
-    struct dpf_msg_header header;
-    __u64 msr_values[NR_OF_MSR]; // Array of MSR values
-};
-
-// Request structure for PMU read
-struct dpf_pmu_read {
-    struct dpf_msg_header header;
-    __u32 core_id;      // Core ID to read PMU from
-};
-
-// Response structure for PMU read
-struct dpf_resp_pmu_read {
-    struct dpf_msg_header header;
-    __u64 pmu_values[PMU_COUNTERS]; // Array of PMU counter values
-};
-
-// Request structure for DDR configuration
-struct dpf_ddr_config {
-	struct dpf_msg_header header;
-	__u64 bar_address; // BAR address for DDR config space
-	__u32 cpu_type;	   // CPU type (e.g., DDR_CLIENT, DDR_GRR_SRF)
-	__u32 num_controllers; // Number of DDR controllers
-};
-
-// Response structure for DDR configuration
-struct dpf_resp_ddr_config {
-	struct dpf_msg_header header;
-	__u64 confirmed_bar;  // Confirmed BAR address
-	__u32 confirmed_type; // Confirmed CPU type
-};
-
-// Request structure for reading DDR bandwidth
-struct dpf_ddr_bw_read {
-	struct dpf_msg_header header;
-};
-
-// Response structure for reading DDR bandwidth
-struct dpf_resp_ddr_bw_read {
-	struct dpf_msg_header header;
-	uint64_t read_bw;
-	uint64_t write_bw;
-};
+// Note: Struct definitions have been moved to kernel_api.h
+// Forward declare the structures here to avoid circular dependency
+struct dpf_msg_header_s;
+struct dpf_req_init_s;
+struct dpf_resp_init_s;
+struct dpf_core_range_s;
+struct dpf_resp_core_range_s;
+struct dpf_core_weight_s;
+struct dpf_resp_core_weight_s;
+struct dpf_req_tuning_s;
+struct dpf_resp_tuning_s;
+struct dpf_ddrbw_set_s;
+struct dpf_resp_ddrbw_set_s;
+struct dpf_msr_read_s;
+struct dpf_resp_msr_read_s;
+struct dpf_pmu_read_s;
+struct dpf_resp_pmu_read_s;
+struct dpf_ddr_config_s;
+struct dpf_resp_ddr_config_s;
+struct dpf_ddr_bw_read_s;
+struct dpf_resp_ddr_bw_read_s;
+struct dpf_pmu_log_control_s;
+struct dpf_resp_pmu_log_control_s;
+struct dpf_pmu_log_stop_s;
+struct dpf_resp_pmu_log_stop_s;
+struct dpf_pmu_log_read_s;
+struct dpf_resp_pmu_log_read_s;
 
 // Core state structure
 struct core_state_s {
@@ -196,10 +132,21 @@ struct core_state_s {
 extern int sys_first_core;
 extern int sys_active_cores;
 
-inline int first_core(void);
-inline int active_cores(void);
-inline int core_in_module(int core_id);
-inline int module_id(int core_id);
+static inline int first_core(void) {
+    return sys_first_core;
+}
+
+static inline int active_cores(void) {
+    return sys_active_cores;
+}
+
+static inline int core_in_module(int core_id) {
+    return (core_id - sys_first_core) % 4;
+}
+
+static inline int module_id(int core_id) {
+    return (core_id - sys_first_core) / 4;
+}
 
 // External declarations
 extern struct core_state_s corestate[MAX_NUM_CORES];
@@ -217,5 +164,8 @@ int msr_set_l2xq(int core_id, int value);
 int msr_get_l2xq(int core_id);
 int msr_set_l3xq(int core_id, int value);
 int msr_get_l3xq(int core_id);
+
+// PMU configuration functions
+int configure_pmu(int core_id);
 
 #endif /* __KERNEL_COMMON_H__ */

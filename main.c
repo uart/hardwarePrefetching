@@ -601,7 +601,9 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 		
-		if (core_first != -1 || core_last != -1) {
+		if (core_first != -1 && core_last != -1) {
+			logi(TAG, "Cores: %d -> %d = %d threads\n", core_first,
+			     core_last, core_last - core_first + 1);
 			if (kernel_core_range(core_first, core_last) < 0) {
 				loge(TAG, "Failed to configure core range\n");
 				return -1;

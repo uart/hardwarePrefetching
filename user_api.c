@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "kernelmod/kernel_api.h"
 #include "kernelmod/kernel_common.h"
@@ -20,6 +21,13 @@
 #define PMU_LOG_MODE_RESET 0
 #define PMU_LOG_MODE_APPEND 1
 
+// Time utility function added locally to avoid header conflicts
+static uint64_t get_time_ms(void)
+{
+	struct timespec time;
+	clock_gettime(CLOCK_MONOTONIC, &time);
+	return (uint64_t)(time.tv_nsec / 1000000) + ((uint64_t)time.tv_sec * 1000ULL);
+}
 
 
 // Starts PMU event logging with the specified buffer size
@@ -590,17 +598,24 @@ int kernel_log_pmu_values(uint32_t core_id)
 int kernel_log_ddr_bw(void)
 {
 	uint64_t read_bw, write_bw;
+	static uint64_t time_old = 0;
 
 	if (kernel_ddr_bw_read(&read_bw, &write_bw) < 0) {
 		loge(TAG, "Failed to read DDR bandwidth values\n");
 		return -1;
 	}
 
-	double read_mbps = (double)read_bw / (1024 * 1024);
-	double write_mbps = (double)write_bw / (1024 * 1024);
+	//  first call - initialize timing and show values in MB
+	if (time_old == 0) {
+		time_old = get_time_ms();
+		double read_mb = (double)read_bw / (1024 * 1024);
+		double write_mb = (double)write_bw / (1024 * 1024);
+		logi(TAG, "DDR Bandwidth Initialization: Read=%.2f MB, Write=%.2f MB\n", read_mb, write_mb);
+		return 0;
+	}
 
-	logi(TAG, "DDR Bandwidth: Read=%llu bytes (%.2f MB/s), Write=%llu bytes (%.2f MB/s)\n",
-	     read_bw, read_mbps, write_bw, write_mbps);
+	// subsequent calls
+	time_old = get_time_ms();
 
 	return 0;
 }

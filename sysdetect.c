@@ -344,19 +344,16 @@ static int dmi_check_same_speed(int type17_total, struct type17_s *type17)
 }
 
 
-
 // Reads all the various DMI types from a file and then calculates the total
 // memory bandwidth based on type 17 (memory device) data and returns the result
-// It handles errors during file access, data reading, and ensures bandwidth is
-// valid.
-//  Returns the total calculated bandwidth, or -1 if an error occurs.
-int dmi_get_bandwidth(void)
-{
+// It handles errors during file access, data reading, and ensures bandwidth is valid.
+// Returns the total calculated bandwidth, or -1 if an error occurs.
+int dmi_get_bandwidth(void) {
 	struct type17_s type17[MAX_DMI_MEM_CH];
 	struct dmi_type_header_s current_header;
 	int type17_count = 0;
+	int populated_count = 0;
 	FILE *fp;
-
 
 	// Open the file in binary read mode
 	fp = fopen(DMI_FILE, "rb");
@@ -380,20 +377,21 @@ int dmi_get_bandwidth(void)
 			type17[type17_count].type = type;
 			type17[type17_count].length = length;
 
-			int type17_version = dmi_read_type17(length,
-					&type17[type17_count], fp);
-
+			int type17_version = dmi_read_type17(length, &type17[type17_count], fp);
 			if (type17_version < 0) {
 				loge(TAG, "Error reading type 17 fields\n");
 				fclose(fp);
 				return -1;
 			}
 
-			//Log information about the found type17 entry: speed
-			// and size
+			// Log information about the found type17 entry: speed and size
 			logv(TAG, "Found type17 #%d Speed = %d Size = %d\n",
-				type17_count + 1, type17[type17_count].speed,
-					type17[type17_count].size);
+			     type17_count + 1, type17[type17_count].speed,
+			     type17[type17_count].size);
+
+			if (type17[type17_count].size > 0) {
+				populated_count++;
+			}
 
 			type17_count++;
 		} else {
@@ -426,7 +424,6 @@ int dmi_get_bandwidth(void)
 		while (!(byte1 == 0x00 && byte2 == 0x00)) {
 			byte1 = byte2;
 			zero_ret = fread(&byte2, sizeof(uint8_t), 1, fp);
-
 			if (zero_ret != 1) {
 				loge(TAG, "Error reading zero sequence\n");
 				fclose(fp);
@@ -437,75 +434,57 @@ int dmi_get_bandwidth(void)
 
 	fclose(fp);
 
-	int memory_speed = type17[0].speed;
-	int total_bandwidth = 0;
-
-	// An array to keep track of all the bandwidth
-	int bandwidth_values[type17_count];
-
-	// Get the lowest speed
-	for (int i = 0; i < type17_count; i++) {
-		if (type17[i].speed == 0)
-			continue;
-
-		if ((type17[i].speed < memory_speed) || memory_speed == 0)
-			memory_speed = type17[i].speed;
-	}
-
-	int equal_speed = dmi_check_same_speed(type17_count, type17);
-
-	if (equal_speed < 0)
-		logv(TAG, "Memory speed are not equal\n");
-
-	// Calculate the theoretical bandwidth for the various type 17
-	for (int i = 0; i < type17_count; i++) {
-		//  bandwidth = memory speed * 8 bytes per transaction
-		bandwidth_values[i] = memory_speed * 8;
-	}
-
-	// If check_same_size returns a value greater than zero, then all
-	// devices have same size
-	// For equal bandwidth, add all the respective bandwidth together
-	// Else report the lowest bandwidth
-
-	if (dmi_check_same_size(type17_count, type17) > 0) {
-		for (int i = 0; i < type17_count; i++)
-			total_bandwidth += bandwidth_values[i];
-
-	} else {
-		total_bandwidth = bandwidth_values[0];
-	}
-
-
-	if (total_bandwidth <= 0) {
-		loge(TAG, "bandwidth is %d\n", total_bandwidth);
+	if (populated_count == 0) {
+		loge(TAG, "No populated memory channels found\n");
 		return -1;
 	}
 
-		logv(TAG, "Total memory BW: %d MB/s @ %d ch\n",
-				total_bandwidth, type17_count);
+	int memory_speed = 0;
+	// Get the lowest non-zero speed
+	for (int i = 0; i < type17_count; i++) {
+		if (type17[i].size == 0 || type17[i].speed == 0)
+			continue;
+
+		if (memory_speed == 0 || type17[i].speed < memory_speed)
+			memory_speed = type17[i].speed;
+	}
+
+	if (memory_speed == 0) {
+		loge(TAG, "No valid memory speed found\n");
+		return -1;
+	}
+
+	int equal_speed = dmi_check_same_speed(type17_count, type17);
+	if (equal_speed < 0)
+		logv(TAG, "Memory speeds are not equal\n");
+
+	int equal_size = dmi_check_same_size(type17_count, type17);
+	if (equal_size < 0)
+		logv(TAG, "Memory sizes are not equal across populated channels\n");
+
+	// Calculate total bandwidth based on populated channels
+	int total_bandwidth = populated_count * (memory_speed * 8);
+
+	if (total_bandwidth <= 0) {
+		loge(TAG, "Bandwidth is %d\n", total_bandwidth);
+		return -1;
+	}
+
+	logv(TAG, "Total memory BW: %d MB/s @ %d ch\n",
+	     total_bandwidth, populated_count);
 
 	return total_bandwidth;
 }
 
-
-
-
-
-
 // MEASURE MEMORY BANDWIDTH
-
 
 uint64_t *parray_one;
 uint64_t *parray_two;
 
-
-
-// It allocates memory for the arrays, checks for successful allocation
-// If memory allocation fails, it logs an error message and returns -1.
-// On successful initialization, it returns 0.
-int ddrmembw_init(void)
-{
+// Allocates memory for the arrays, checks for successful allocation
+// If memory allocation fails, logs an error message and returns -1.
+// On successful initialization, returns 0.
+int ddrmembw_init(void) {
 	parray_one = (uint64_t *)malloc(sizeof(uint64_t) * BWTEST_ARRAY_SIZE);
 	if (parray_one == NULL) {
 		loge(TAG, "Memory allocation failed\n");
@@ -525,39 +504,30 @@ int ddrmembw_init(void)
 
 	return 0;
 
-
 FREE_ONE:
 	free(parray_one);
 RETURN_ERROR:
 	return -1;
 }
 
-
-
-int ddrmembw_deinit(void)
-{
+int ddrmembw_deinit(void) {
 	free(parray_one);
 	free(parray_two);
 
 	return 0;
 }
 
-
-// Copy
-int ddrmembw_copy(void)
-{
+// Copy with memory barriers to ensure proper memory access
+int ddrmembw_copy(void) {
 	for (int i = 0; i < BWTEST_ARRAY_SIZE; i++)
 		parray_two[i] = parray_one[i];
-
 	return 0;
 }
 
-
 // Identify the minimum/best execution time
-// It accept an array of execution time
-// It will return the minimum time
-double ddrmembw_min_time(double *time_array)
-{
+// Accepts an array of execution times
+// Returns the minimum time
+double ddrmembw_min_time(double *time_array) {
 	// Check if the array is empty
 	if (time_array[0] == 0)
 		return -1;
@@ -572,28 +542,25 @@ double ddrmembw_min_time(double *time_array)
 	return min;
 }
 
-
-// Measures DDR memory bandwidth for the copy operation. It executes the
+// Measures DDR memory bandwidth for the copy operation. Executes the
 // copy operation multiple times, records the execution time for each run,
 // and calculates the minimum execution time. The bandwidth in megabytes
-// per second is then computed based on the minimum time and the total
+// per second is computed based on the minimum time and the total
 // data transferred, which is logged for performance analysis.
-int ddrmembw_measurement(void)
-{
+int ddrmembw_measurement(void) {
 	clock_t start_time, end_time;
 	double bandwidth;
 	size_t total_byte;
 	double time_taken_array[NTIMES];
 	double min_time;
 
-	// perform copy operation by NTIMES
-	// get the various execution time for copy and push to array
+	// Perform copy operation by NTIMES
+	// Get the various execution times for copy and push to array
 	for (int i = 0; i < NTIMES; i++) {
 		start_time = clock();
 		ddrmembw_copy();
 		end_time = clock();
-		time_taken_array[i] = (double)(end_time - start_time)
-						/CLOCKS_PER_SEC;
+		time_taken_array[i] = (double)(end_time - start_time) / CLOCKS_PER_SEC;
 	}
 
 	min_time = ddrmembw_min_time(time_taken_array);
@@ -605,10 +572,10 @@ int ddrmembw_measurement(void)
 
 	total_byte = 2 * BWTEST_ARRAY_SIZE * sizeof(uint64_t);
 	bandwidth = (total_byte / min_time) / MEGABYTE;
-	logv(TAG, "Bandwidth  Measured: %f\n", bandwidth);
+	logv(TAG, "Bandwidth Measured: %f\n", bandwidth);
 
 	if (bandwidth < 1) {
-		loge(TAG, "bandwidth is %f\n", bandwidth);
+		loge(TAG, "Bandwidth is %f\n", bandwidth);
 		return 0;
 	}
 

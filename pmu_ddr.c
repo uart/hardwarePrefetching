@@ -175,7 +175,7 @@ int pmu_ddr_init(struct ddr_s *ddr, int kernel_mode)
 // read and write counters but only the type is returned by the function.
 static uint64_t pmu_ddr_client(struct ddr_s *ddr, int type)
 {
-	uint64_t total = 0; // ✅ Initialize total to avoid uninitialized warning
+	uint64_t total = 0; //Initialize total to avoid uninitialized warning
 	uint64_t oldvalue_rd[num_ddr_controllers];
 	uint64_t oldvalue_wr[num_ddr_controllers];
 

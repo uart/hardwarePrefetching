@@ -254,14 +254,14 @@ static void per_core_work(void *info)
 		if (pmu_logging_active && pmu_log_buffer) {
 			// Create a log entry with core_id and PMU values
 			dpf_pmu_log_entry_t log_entry;
-			
+
 			// Fill the log entry
 			log_entry.core_id = core_id;
 			log_entry.timestamp = ktime_get_ns(); // nanosecond timestamp
-			
+
 			// Copy PMU values from corestate to log entry
 			memcpy(log_entry.pmu_values, corestate[core_id].pmu_result, sizeof(log_entry.pmu_values));
-			
+
 			// Debug: Print first few PMU values
 			pr_info("Core %d: PMU values[0]=%llu, [1]=%llu, [2]=%llu, [3]=%llu\n", 
 			       core_id, 
@@ -269,14 +269,14 @@ static void per_core_work(void *info)
 			       log_entry.pmu_values[1],
 			       log_entry.pmu_values[2],
 			       log_entry.pmu_values[3]);
-			
+
 			// Append to log buffer
 			int ret = api_pmu_log_append_data(&log_entry, sizeof(log_entry));
 			if (ret < 0) {
 				pr_err("Failed to append PMU data for core %d: %d\n", core_id, ret);
 			}
 		}
-		
+
 		if (core_in_module(core_id) == 0 && is_msr_dirty(core_id) == 1) {
 			pr_info("Core %d update MSR\n", core_id);
 
@@ -292,10 +292,12 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 		return HRTIMER_NORESTART;
 
 	if (!cpumask_empty(&enabled_cpus)) {
-		pr_info("Enabling smp_call_function_many\n");
+		preempt_disable(); //required by smp_call_function_*()
+		//pr_info("Enabling smp_call_function_many\n");
 		smp_call_function_many(&enabled_cpus, per_core_work,
 					NULL, false);
-	} 
+		preempt_enable();
+	}
 
 	hrtimer_forward_now(timer, kt_period);
 	return HRTIMER_RESTART;

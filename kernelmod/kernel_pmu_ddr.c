@@ -18,9 +18,12 @@ struct ddr_s ddr = {0};
 // Returns: total bandwidth in bytes , updates ddr_s struct
 static uint64_t kernel_pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 {
-	uint64_t total = 0;
-	void __iomem *addr;
+        void __iomem *addr;
 	int i;
+
+	uint64_t total = 0;
+        uint64_t delta = 0;
+        uint64_t final_result = 0;
 
 	if (type == DDR_PMU_RD) {
 		// Handle read counters
@@ -36,7 +39,9 @@ static uint64_t kernel_pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 			addr = (void __iomem *)(ddr->mmap[i]);
 			ddr->rd_last_update[i] = readq(addr);
 
-			total += ddr->rd_last_update[i] - oldvalue_rd;
+			delta = ddr->rd_last_update[i] - oldvalue_rd;
+
+			total += delta;
 		}
 	} else if (type == DDR_PMU_WR) {
 		// Handle write counters
@@ -53,11 +58,15 @@ static uint64_t kernel_pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 						(GRR_SRF_FREE_RUN_CNTR_WRITE - GRR_SRF_FREE_RUN_CNTR_READ));
 			ddr->wr_last_update[i] = readq(addr);
 
-			total += ddr->wr_last_update[i] - oldvalue_wr;
+			delta = ddr->wr_last_update[i] - oldvalue_wr;
+
+			total += delta;
 		}
 	}
 
-	return total * 64;
+	final_result = total * 64;
+
+	return final_result;
 }
 
 // Reads DDR performance counters for Client CPUs
@@ -65,9 +74,11 @@ static uint64_t kernel_pmu_ddr_grr_srf(struct ddr_s *ddr, int type)
 // Returns: total bandwidth in bytes, updates ddr_s struct
 static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 {
-	uint64_t total = 0;
-	void __iomem *addr;
+        void __iomem *addr;
 	int i;
+	uint64_t total = 0;
+        uint64_t final_result = 0;
+        uint64_t diff = 0;
 
 	if (type == DDR_PMU_RD) {
 		// Handle read counters
@@ -84,7 +95,7 @@ static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 			ddr->rd_last_update[i] = readq(addr);
 
 			uint64_t diff = ddr->rd_last_update[i] - oldvalue_rd;
-
+		
 			total += diff;
 		}
 	} else if (type == DDR_PMU_WR) {
@@ -101,13 +112,15 @@ static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 			addr = (void __iomem *)(ddr->mmap[i] + CLIENT_DDR_WR_BW);
 			ddr->wr_last_update[i] = readq(addr);
 
-			uint64_t diff = ddr->wr_last_update[i] - oldvalue_wr;
+			diff = ddr->wr_last_update[i] - oldvalue_wr;
 
 			total += diff;
 		}
 	}
 
-	return total * 64;
+        final_result = total * 64;
+
+	return final_result;
 }
 
 // Reads DDR performance counters based on CPU type
@@ -115,12 +128,18 @@ static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 // Returns: total bandwidth in bytes, or -EINVAL on error
 uint64_t kernel_pmu_ddr(struct ddr_s *ddr, int type)
 {
-	if (ddr_cpu_type == DDR_CLIENT)
-		return kernel_pmu_ddr_client(ddr, type);
-	else if (ddr_cpu_type == DDR_GRR_SRF)
-		return kernel_pmu_ddr_grr_srf(ddr, type);
+	uint64_t result;
 
-	pr_err("%s: Invalid DDR type %d\n", __func__, ddr_cpu_type);
+	if (ddr_cpu_type == DDR_CLIENT) {
+		result = kernel_pmu_ddr_client(ddr, type);
+		return result;
+	} else if (ddr_cpu_type == DDR_GRR_SRF) {
+		result = kernel_pmu_ddr_grr_srf(ddr, type);
+		return result;
+	}
+
+	pr_err("%s: Invalid DDR type %d (should be %d=CLIENT or %d=GRR_SRF)\n", 
+	       __func__, ddr_cpu_type, DDR_CLIENT, DDR_GRR_SRF);
 
 	return -EINVAL;
 }

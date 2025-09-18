@@ -12,17 +12,27 @@
 int kernel_basicalg(int tunealg, int aggr)
 {
 	uint64_t ddr_rd_bw,ddr_wr_bw; //only used for the first thread
-	uint64_t time_now, time_old = 0;
-	uint64_t time_delta;
+	static uint64_t time_old = 0; // Make static to persist between calls
 
-	//
+	uint64_t time_now;
+	uint64_t time_delta_ms;
+        uint64_t ddr_rd_bw_mb_total;
+        uint64_t ddr_wr_bw_mb_total;
+        uint64_t ddr_rd_bw_mb_per_sec = 0;
+        uint64_t ddr_wr_bw_mb_per_sec = 0;
+        int ddr_rd_percent = 0;
+
 	// Grab all PMU data
 	//
 
 	ddr_rd_bw = kernel_pmu_ddr(&ddr, DDR_PMU_RD);
 	ddr_wr_bw = kernel_pmu_ddr(&ddr, DDR_PMU_WR);
 
-	pr_info("DDR RD BW: %llu MB/s\n", ddr_rd_bw/(1024*1024));
+	if (ddr_rd_bw == (uint64_t)-EINVAL || ddr_wr_bw == (uint64_t)-EINVAL) {
+		pr_err("kernel_basicalg: DDR PMU read failed (RD=%llu, WR=%llu)\n", 
+		       ddr_rd_bw, ddr_wr_bw);
+		return -EINVAL;
+	}
 
 	if (time_old == 0) {
 		time_old = ktime_get_ns();
@@ -30,12 +40,31 @@ int kernel_basicalg(int tunealg, int aggr)
 	}
 
 	time_now = ktime_get_ns();
-	time_delta = (time_now - time_old) / 1000000;
+	time_delta_ms = (time_now - time_old) / 1000000; // convert ns to ms
 	time_old = time_now;
 
-	int ddr_rd_percent = (ddr_rd_bw/(1024*1024)) / ddr_bw_target;
-	ddr_rd_percent /= time_delta;
-	//pr_info("Time delta %f, Running at %.1f percent rd bw (%ld MB/s)\n", time_delta, ddr_rd_percent * 100, ddr_rd_bw/(1024*1024));
+        // calculate actual bandwidth
+        ddr_rd_bw_mb_total = ddr_rd_bw / (1024 * 1024); 
+        ddr_wr_bw_mb_total = ddr_wr_bw / (1024 * 1024); 
+
+        // calculate MB/s  (MB_total * 1000) / time_delta_ms
+        if (time_delta_ms > 0) {
+                ddr_rd_bw_mb_per_sec = (ddr_rd_bw_mb_total * 1000) / time_delta_ms;
+                ddr_wr_bw_mb_per_sec = (ddr_wr_bw_mb_total * 1000) / time_delta_ms;
+        }
+
+        pr_info("DDR RD BW: %llu MB (%llu MB/s over %llu ms)\n", 
+                ddr_rd_bw_mb_total, ddr_rd_bw_mb_per_sec, time_delta_ms);
+        pr_info("DDR WR BW: %llu MB (%llu MB/s over %llu ms)\n", 
+                ddr_wr_bw_mb_total, ddr_wr_bw_mb_per_sec, time_delta_ms);
+
+        // calculate percentage of target bandwidth (using actual MB/s rate)
+        if (ddr_bw_target > 0) {
+                ddr_rd_percent = (int)((ddr_rd_bw_mb_per_sec * 100) / ddr_bw_target);
+        }
+        
+        pr_debug("Running at %d%% of target bandwidth (%llu MB/s of %d MB/s target)\n", 
+                 ddr_rd_percent, ddr_rd_bw_mb_per_sec, ddr_bw_target);
 
 	int l2_hitr[MAX_NUM_CORES];
 	int l3_hitr[MAX_NUM_CORES];

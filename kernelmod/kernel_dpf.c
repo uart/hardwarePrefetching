@@ -107,7 +107,7 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 {
 	size_t bytes_to_copy;
 
-	pr_info("%s: Enter: count=%zu, pos=%lld, proc_buffer_size=%zu\n", 
+	pr_info("%s: Enter: count=%zu, pos=%lld, proc_buffer_size=%zu\n",
 	       __func__, count, *pos, proc_buffer_size);
 
 	// Check if we have data to read
@@ -125,19 +125,19 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 	// Calculate how much we can copy
 	bytes_to_copy = min(count, proc_buffer_size - *pos);
 
-	pr_info("%s: Attempting to copy %zu bytes from offset %lld\n", 
+	pr_info("%s: Attempting to copy %zu bytes from offset %lld\n",
 	       __func__, bytes_to_copy, *pos);
 
 	// Copy data to user space
 	if (copy_to_user(buffer, proc_buffer + *pos, bytes_to_copy)) {
-		pr_err("%s: Failed to copy %zu bytes to user buffer\n", 
+		pr_err("%s: Failed to copy %zu bytes to user buffer\n",
 		      __func__, bytes_to_copy);
 		return -EFAULT;
 	}
 
 	// Update position
 	*pos += bytes_to_copy;
-	pr_info("%s: Successfully copied %zu bytes (new pos: %lld)\n", 
+	pr_info("%s: Successfully copied %zu bytes (new pos: %lld)\n",
 	       __func__, bytes_to_copy, *pos);
 
 	return bytes_to_copy;
@@ -245,11 +245,6 @@ static void per_core_work(void *info)
 	if (corestate[core_id].core_disabled == 0) {
 		pmu_update(core_id);
 
-		if (core_id == first_core()) {
-			pr_info("First Core - run alg %d\n", tune_alg);
-
-			if(tune_alg == 1)kernel_basicalg(tune_alg, aggr);
-		}
 		// Log PMU data if logging is active
 		if (pmu_logging_active && pmu_log_buffer) {
 			// Create a log entry with core_id and PMU values
@@ -263,8 +258,8 @@ static void per_core_work(void *info)
 			memcpy(log_entry.pmu_values, corestate[core_id].pmu_result, sizeof(log_entry.pmu_values));
 
 			// Debug: Print first few PMU values
-			pr_info("Core %d: PMU values[0]=%llu, [1]=%llu, [2]=%llu, [3]=%llu\n", 
-			       core_id, 
+			pr_info("Core %d: PMU values[0]=%llu, [1]=%llu, [2]=%llu, [3]=%llu\n",
+			       core_id,
 			       log_entry.pmu_values[0],
 			       log_entry.pmu_values[1],
 			       log_entry.pmu_values[2],
@@ -277,8 +272,15 @@ static void per_core_work(void *info)
 			}
 		}
 
+		if (core_id == first_core()) {
+			if((tune_alg == 0) || (tune_alg == 1))kernel_basicalg(tune_alg, aggr);
+			//else if ()  //Multi-Armed Bandit (MAB) goes here
+			else pr_err("First Core ready but tune alg %d has not been defined\n", tune_alg);
+
+		}
+
 		if (core_in_module(core_id) == 0 && is_msr_dirty(core_id) == 1) {
-			pr_info("Core %d update MSR\n", core_id);
+			pr_debug("Core %d update MSR\n", core_id);
 
 			msr_update(core_id);
 		}
@@ -292,6 +294,10 @@ static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 		return HRTIMER_NORESTART;
 
 	if (!cpumask_empty(&enabled_cpus)) {
+
+		//first call for myself, then all other cores
+		per_core_work(NULL);
+
 		preempt_disable(); //required by smp_call_function_*()
 		//pr_info("Enabling smp_call_function_many\n");
 		smp_call_function_many(&enabled_cpus, per_core_work,

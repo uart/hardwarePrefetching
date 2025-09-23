@@ -13,7 +13,7 @@
 //DDR Controller offset
 #define CLIENT_DDR0_OFFSET (0x00000)
 #define CLIENT_DDR1_OFFSET (0x10000)
-#define GRR_SRF_MC_ADDRESS(n) (0x24C000 + (0x10000 * (n)))
+#define GRR_SRF_MC_ADDRESS(n) (0x24C000 + (0x4000 * (n)))
 
 #define CLIENT_DDR_RANGE (0x10000)
 #define GRR_SRF_DDR_RANGE (0x10000)

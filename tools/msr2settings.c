@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "../atom_msr.h"
+#include "../include/atom_msr.h"
 
 int main(int argc, char *argv[])
 {

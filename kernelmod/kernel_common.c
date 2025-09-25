@@ -20,15 +20,18 @@ int pmu_update(int core_id)
 	if (core_id < 0 || core_id >= MAX_NUM_CORES || corestate[core_id].core_disabled)
 		return -EINVAL;
 
+	for(int i = 0; i < PMU_COUNTERS; i++) {
+		corestate[core_id].pmu_old[i] = corestate[core_id].pmu_raw[i];
+	}
+
 	// Update PMU counters using the defined indices from kernel_common.h
-	corestate[core_id].pmu_result[PERF_MEM_UOPS_RETIRED_ALL_LOADS] = native_read_pmc(0);	 // PMC0
-	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] = native_read_pmc(1);	 // PMC1
-	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] = 
-	native_read_pmc(2);	 // PMC2
-	corestate[core_id].pmu_result[PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT] = native_read_pmc(3); // PMC3
-	corestate[core_id].pmu_result[PERF_XQ_PROMOTION_ALL] = native_read_pmc(4);		 // PMC4
-	corestate[core_id].pmu_result[PERF_CPU_CLK_UNHALTED_THREAD] = native_read_pmc(5);	 // PMC5
-	corestate[core_id].pmu_result[PERF_INST_RETIRED_ANY_P] = native_read_pmc(6);		 // PMC6
+	corestate[core_id].pmu_raw[PERF_MEM_UOPS_RETIRED_ALL_LOADS] = native_read_pmc(0);
+	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] = native_read_pmc(1);
+	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] =	native_read_pmc(2);
+	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT] = native_read_pmc(3);
+	corestate[core_id].pmu_raw[PERF_XQ_PROMOTION_ALL] = native_read_pmc(4);
+	corestate[core_id].pmu_raw[PERF_CPU_CLK_UNHALTED_THREAD] = native_read_pmc(5);
+	corestate[core_id].pmu_raw[PERF_INST_RETIRED_ANY_P] = native_read_pmc(6);
 
 	return 0;
 }

@@ -240,7 +240,7 @@ static void per_core_work(void *info)
 	// Get the ID of the current CPU core
 	int core_id = smp_processor_id();
 
-	pr_info("Core %d tuning\n", core_id);
+	//pr_debug("Core %d tuning\n", core_id);
 
 	if (corestate[core_id].core_disabled == 0) {
 		pmu_update(core_id);
@@ -255,7 +255,7 @@ static void per_core_work(void *info)
 			log_entry.timestamp = ktime_get_ns(); // nanosecond timestamp
 
 			// Copy PMU values from corestate to log entry
-			memcpy(log_entry.pmu_values, corestate[core_id].pmu_result, sizeof(log_entry.pmu_values));
+			memcpy(log_entry.pmu_values, corestate[core_id].pmu_raw, sizeof(log_entry.pmu_values));
 
 			// Debug: Print first few PMU values
 			pr_info("Core %d: PMU values[0]=%llu, [1]=%llu, [2]=%llu, [3]=%llu\n",

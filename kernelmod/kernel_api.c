@@ -70,28 +70,28 @@ int api_core_range(struct dpf_core_range_s *req_data)
 	// Range checks to validate input parameters
 	pr_info("%s: Received core range request: start=%d, end=%d\n",
 	       __func__, req->core_start, req->core_end);
-	
+
 	// Check that core_start is non-negative
 	if (req->core_start < 0) {
 		pr_err("%s: Invalid core_start value %d (must be >= 0)\n", 
 		       __func__, req->core_start);
 		return -EINVAL;
 	}
-	
+
 	// Check that core_end is within system limits
 	if (req->core_end >= MAX_NUM_CORES) {
 		pr_err("%s: Invalid core_end value %d (must be < %d)\n", 
 		       __func__, req->core_end, MAX_NUM_CORES);
 		return -EINVAL;
 	}
-	
+
 	// Check that core_start <= core_end
 	if (req->core_start > req->core_end) {
 		pr_err("%s: Invalid core range: start=%d is greater than end=%d\n", 
 		       __func__, req->core_start, req->core_end);
 		return -EINVAL;
 	}
-	
+
 	// Check that the range isn't excessive (optional, adjust as needed)
 	if ((req->core_end - req->core_start + 1) > MAX_NUM_CORES) {
 		pr_err("%s: Core range too large: %d cores requested, max is %d\n", 
@@ -120,7 +120,7 @@ int api_core_range(struct dpf_core_range_s *req_data)
 		// Mark cores as enabled/disabled based on range
 		corestate[core_id].core_disabled =
 		    (core_id < req->core_start || core_id > req->core_end);
-		
+
 		// Configure and enable valid cores
 		if (!corestate[core_id].core_disabled) {
 			// Verify the core exists on the system before configuring
@@ -335,7 +335,7 @@ int api_pmu_read(struct dpf_pmu_read_s *req_data)
 	pmu_update(req->core_id);
 
 	for (int i = 0; i < PMU_COUNTERS; i++) {
-		resp->pmu_values[i] = corestate[req->core_id].pmu_result[i];
+		resp->pmu_values[i] = corestate[req->core_id].pmu_raw[i];
 		pr_debug("PMU %d for core %d: %llu\n", i, req->core_id,
 			 resp->pmu_values[i]);
 	}
@@ -522,7 +522,7 @@ int api_pmu_log_control(struct dpf_pmu_log_control_s *req_data)
 		for (int i = 0; i < MAX_NUM_CORES; i++) {
 			if (corestate[i].core_disabled == 0) {
 				// Initialize PMU counters
-				memset(corestate[i].pmu_result, 0, sizeof(corestate[i].pmu_result));
+				memset(corestate[i].pmu_raw, 0, sizeof(corestate[i].pmu_raw));
 				// Enable PMU monitoring
 				configure_pmu(i);
 			}

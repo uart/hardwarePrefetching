@@ -123,10 +123,11 @@ struct dpf_resp_pmu_log_read_s;
 
 // Core state structure
 struct core_state_s {
-    uint64_t pmu_result[PMU_COUNTERS]; // Delta since last PMU read (mapped to pmu_metrics)
-    union msr_u pf_msr[NR_OF_MSR];     // MSR values (0x1320...0x1A4)
-    int pf_msr_dirty;                  // 0 = no update needed, 1 = update needed
-    int core_disabled;                 // 1 = core disabled, 0 = enabled
+    uint64_t pmu_raw[PMU_COUNTERS]; 	// Raw value from last PMU read (mapped to pmu_metrics)
+    uint64_t pmu_old[PMU_COUNTERS];	// Prev. raw last PMU read (mapped to pmu_metrics)
+    union msr_u pf_msr[NR_OF_MSR];	// MSR values (0x1320...0x1A4)
+    int pf_msr_dirty;			// 0 = no update needed, 1 = update needed
+    int core_disabled;			// 1 = core disabled, 0 = enabled
 };
 
 extern int sys_first_core;

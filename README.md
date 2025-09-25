@@ -1,6 +1,22 @@
 # hardwarePrefetching
 Code repository for work on hardware prefetching and controlling hardware prefetchers.
 
+# Status
+User-space tuning has been tested and runs on Intel Client and Server platforms with 
+atom cores. However, user-space tuning adds much overhead and although performance 
+improvements has been seen for a set of memory subsystem dependent applications the 
+overhead has also reduced performance for other applications. Hardware prefetch 
+tuning in user-space should primarily be seen as an experimental setup as it is 
+easy to make tests and modifications.
+
+Kernel based tuning is in experimental stage at this time.
+A first experimental version of the kernel based "primitive" example tune alg is now
+available.  This has been functional tested on GrandRidge. No performance tests has yet
+run as this alg is primarily there to showcase how to access PMU input data
+and tune MSRs per core.
+To see the action this is best run with `sudo dmesg -w` in one terminal as
+well as `watch dumpmsr.sh` from the tools dir in a second terminal.
+
 ## Build
 
 Ubuntu: sudo apt install  build-essential libcjson1 libcjson-dev libpci-dev kmod

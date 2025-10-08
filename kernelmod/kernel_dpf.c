@@ -339,45 +339,39 @@ static int __init dpf_module_init(void)
 }
 
 // Module cleanup
-static void __exit dpf_module_exit(void)
-{
-    pr_info("Stopping dPF monitor thread\n");
+static void __exit dpf_module_exit(void) {
+	pr_info("Stopping dPF monitor thread\n");
 
-    // Stop timer and prevent further work
-    keep_running = false;
-    hrtimer_cancel(&monitor_timer);
+	// Stop timer and prevent further work
+	keep_running = false;
+	hrtimer_cancel(&monitor_timer);
 
-    // Remove /proc entry and free resources
-    remove_proc_entry(PROC_FILE_NAME, NULL);
-    kfree(proc_buffer);
+	// Remove /proc entry and free resources
+	remove_proc_entry(PROC_FILE_NAME, NULL);
+	kfree(proc_buffer);
 
-    // Cleanup PMU logging resources
-    if (pmu_log_buffer) {
-        pr_info("Cleaning up PMU logging resources\n");
-        kfree(pmu_log_buffer);
-        pmu_log_buffer = NULL;
-        pmu_log_buffer_size = 0;
-        pmu_log_data_size = 0;
-        pmu_logging_active = false;
-    }
+	// Cleanup PMU logging resources
+	if (pmu_log_buffer) {
+		pr_info("Cleaning up PMU logging resources\n");
+		kfree(pmu_log_buffer);
+		pmu_log_buffer = NULL;
+		pmu_log_buffer_size = 0;
+		pmu_log_data_size = 0;
+		pmu_logging_active = false;
+	}
 
-    // Cleanup DDR mappings
-    for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
-        if (ddr.mmap[i]) {
-            pr_info("Unmapping DDR memory for controller %d\n", i);
-            iounmap((void __iomem *)ddr.mmap[i]);
-            release_mem_region(ddr_bar_address + 
-                               (ddr_cpu_type == DDR_CLIENT ? 
-                                (i == 0 ? CLIENT_DDR0_OFFSET : CLIENT_DDR1_OFFSET) : 
-                                GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ),
-                               ddr_cpu_type == DDR_CLIENT ? CLIENT_DDR_RANGE : GRR_SRF_DDR_RANGE);
-            ddr.mmap[i] = NULL;
-        }
-    }
+	// Cleanup DDR mappings
+	for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
+		if (ddr.mmap[i]) {
+			pr_info("Unmapping DDR memory for controller %d\n", i);
+			iounmap((void __iomem *)ddr.mmap[i]);
+                        
+			ddr.mmap[i] = NULL;
+		}
+	}
 
-    pr_info("dPF Module Unloaded\n");
+	pr_info("dPF Module Unloaded\n");
 }
-
 
 module_init(dpf_module_init);
 module_exit(dpf_module_exit);

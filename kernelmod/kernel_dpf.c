@@ -6,6 +6,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/ioport.h>
+#include <linux/workqueue.h>
 
 #include "kernel_common.h"
 #include <linux/kernel.h>
@@ -36,6 +37,9 @@ size_t proc_buffer_size;
 __u64 ddr_bar_address;
 static DEFINE_MUTEX(dpf_mutex);
 cpumask_t enabled_cpus;
+
+// Workqueue for deferring SMP calls from timer to task context
+static struct work_struct monitor_work;
 
 
 // Global tuning algorithm settings, these should be set through the dpf_tuning_control API.
@@ -287,23 +291,39 @@ static void per_core_work(void *info)
 	}
 }
 
-// Optimized monitor callback using precomputed cpumask
+// Workqueue function that executes per-core work in task context
+// This runs in a kworker thread, satisfying in_task() requirement
+static void monitor_work_func(struct work_struct *work)
+{
+	// Verify we're in task context (diagnostic)
+	if (in_interrupt()) {
+		pr_err("BUG: monitor_work_func running in interrupt context!\n");
+		return;
+	}
+
+	if (!keep_running)
+		return;
+
+	if (!cpumask_empty(&enabled_cpus)) {
+		// Execute work on local CPU first
+		per_core_work(NULL);
+
+		// Now safe to call smp_call_function_many from task context
+		// wait=true ensures synchronization before returning
+		smp_call_function_many(&enabled_cpus, per_core_work,
+					NULL, true);
+	}
+}
+
+// Lightweight timer callback - only schedules work, no SMP calls
 static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 {
 	if (!keep_running)
 		return HRTIMER_NORESTART;
 
-	if (!cpumask_empty(&enabled_cpus)) {
-
-		//first call for myself, then all other cores
-		per_core_work(NULL);
-
-		preempt_disable(); //required by smp_call_function_*()
-		//pr_info("Enabling smp_call_function_many\n");
-		smp_call_function_many(&enabled_cpus, per_core_work,
-					NULL, false);
-		preempt_enable();
-	}
+	// Schedule work to run in task context
+	// schedule_work() is safe from IRQ context and prevents duplicate queuing
+	schedule_work(&monitor_work);
 
 	hrtimer_forward_now(timer, kt_period);
 	return HRTIMER_RESTART;
@@ -330,6 +350,8 @@ static int __init dpf_module_init(void)
 		kfree(proc_buffer);
 		return -ENOMEM;
 	}
+	// Initialize workqueue for deferred SMP calls
+	INIT_WORK(&monitor_work, monitor_work_func);
 
 	kt_period = ktime_set(TIMER_INTERVAL_SEC, 0);
 	hrtimer_init(&monitor_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -345,6 +367,8 @@ static void __exit dpf_module_exit(void) {
 	// Stop timer and prevent further work
 	keep_running = false;
 	hrtimer_cancel(&monitor_timer);
+	// Wait for any pending work to complete before cleanup
+	cancel_work_sync(&monitor_work);
 
 	// Remove /proc entry and free resources
 	remove_proc_entry(PROC_FILE_NAME, NULL);

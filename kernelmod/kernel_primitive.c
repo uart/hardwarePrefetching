@@ -13,6 +13,8 @@ static int l3_hitr[MAX_NUM_CORES];
 static int good_pf[MAX_NUM_CORES];
 static int core_contr_to_ddr[MAX_NUM_CORES];
 static uint64_t pmu_delta[MAX_NUM_CORES][PMU_COUNTERS]; //changes since last PMU readout
+static int first_core_idx;
+static int last_core_idx;
 
 //Only tunealg 1 is supported at this time
 int kernel_basicalg(int tunealg, int aggr)
@@ -48,6 +50,8 @@ int kernel_basicalg(int tunealg, int aggr)
 	if (time_old == 0) {
 		//no selection the first time since all counters will be odd
 		time_old = ktime_get_ns();
+                first_core_idx = first_core();
+		last_core_idx = first_core_idx + active_cores();
 
 		//first time, do some initialization
 
@@ -82,7 +86,7 @@ int kernel_basicalg(int tunealg, int aggr)
 	//
 	//Process PMU data
 	//
-	for (int i = 0; i < active_cores(); i++) {
+	for (int i = first_core_idx; i < last_core_idx; i++) {
 		for (int j = 0; j < PMU_COUNTERS ; j++) {
 			pmu_delta[i][j] = corestate[i].pmu_raw[j] - corestate[i].pmu_old[j];
 		}
@@ -99,7 +103,7 @@ int kernel_basicalg(int tunealg, int aggr)
 
 	uint64_t total_ddr_hit = 0;
 
-	for (int i = 0; i < active_cores(); i++) {
+	for (int i = first_core_idx; i < last_core_idx; i++) {
 		total_ddr_hit += pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT];
 	}
 
@@ -111,7 +115,7 @@ int kernel_basicalg(int tunealg, int aggr)
 
 	pr_info("delta for total_ddr_hit %llu or %llu MB/s\n", total_ddr_hit, (total_ddr_hit*64) >> 20);
 
-	for (int i = 0; i < active_cores(); i++) {
+	for (int i = first_core_idx; i < last_core_idx; i++) {
 		//check for divide by zero
 		if((pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] == 0) |
 			(pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] == 0) |

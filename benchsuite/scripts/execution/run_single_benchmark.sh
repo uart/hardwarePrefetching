@@ -8,6 +8,7 @@ source "scripts/utils/dpf_management.sh" 2>/dev/null || source "./scripts/utils/
 declare -a BENCHMARK_PIDS=()
 DPF_PID=""
 CLEANUP_REQUIRED=false
+ORIGINAL_TURBO_STATE=""  # Store original turbo state for restoration
 
 # Cleanup function to kill all processes
 cleanup() {
@@ -38,6 +39,11 @@ cleanup() {
         fi
         
         echo "Cleanup completed"
+    fi
+    
+    # Restore original turbo state if it was saved
+    if [[ -n "$ORIGINAL_TURBO_STATE" ]]; then
+        restore_turbo_state
     fi
 }
 
@@ -289,7 +295,6 @@ else
 fi
 
 #### 6. Load Configuration Parameters #######################################
-# Source configuration from central file (already loaded above, just map parameters)
 if [[ -f "$config_file_path" ]]; then
     # Configuration already sourced above, just map variables
     
@@ -343,6 +348,50 @@ start_dpf() {
     echo "$dpf_pid"
 }
 
+#### Turbo State Management Functions #######################################
+
+read_turbo_state() {
+    # Read MSR 0x1a0 (IA32_MISC_ENABLE), check bit 38
+    # Bit 38 = 1: turbo disabled, Bit 38 = 0: turbo enabled
+    sudo modprobe msr 2>/dev/null
+    local msr_value=$(sudo rdmsr -p 0 0x1a0 2>/dev/null)
+    
+    if [[ -z "$msr_value" ]]; then
+        echo "WARNING: Could not read turbo state from MSR" >&2
+        return 1
+    fi
+    
+    # Check bit 38 (0x4000000000 in hex)
+    local bit38=$(( (0x$msr_value >> 38) & 1 ))
+    
+    if [[ $bit38 -eq 1 ]]; then
+        echo "disabled"
+    else
+        echo "enabled"
+    fi
+}
+
+save_and_disable_turbo() {
+    # Save current state
+    ORIGINAL_TURBO_STATE=$(read_turbo_state)
+    echo "Original turbo state: $ORIGINAL_TURBO_STATE"
+    
+    # Always disable turbo for benchmarks
+    sudo modprobe msr 2>/dev/null
+    sudo wrmsr -a 0x1a0 0x4000850089
+    echo "Turbo disabled for benchmark execution"
+}
+
+restore_turbo_state() {
+    if [[ "$ORIGINAL_TURBO_STATE" == "enabled" ]]; then
+        echo "Restoring turbo to enabled state"
+        sudo modprobe msr 2>/dev/null
+        sudo wrmsr -a 0x1a0 0x850089
+    else
+        echo "Turbo was originally disabled, leaving it disabled"
+    fi
+}
+
 set_governor_to_performance() {
     # More efficient: use shell globbing instead of loop
     if ls /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1; then
@@ -350,9 +399,11 @@ set_governor_to_performance() {
     fi
 }
 
-disable_turbo_boost() {
-    sudo modprobe msr
-    sudo wrmsr -a 0x1a0 0x4000850089
+set_governor_to_powersave() {
+    if ls /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1; then
+        echo powersave | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null
+        echo "Governor set to: powersave"
+    fi
 }
 
 enable_rdpmc() {
@@ -397,9 +448,16 @@ generate_core_range() {
 #### 8. Main Execution Logic ################################################
 core_range=$(generate_core_range) || exit 1
 
+# Save current turbo state and disable it for benchmarks
+save_and_disable_turbo
+
 # Set CPU performance settings
-[ "$performance" -eq 1 ] && set_governor_to_performance
-[ "$turbo" -eq 0 ] && disable_turbo_boost
+if [ "$performance" -eq 1 ]; then
+    set_governor_to_performance
+elif [ "$performance" -eq 0 ]; then
+    set_governor_to_powersave
+fi
+
 [ "$rdpmc" -eq 1 ] && enable_rdpmc
 
 run_benchmark() {

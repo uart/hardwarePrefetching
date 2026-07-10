@@ -21,7 +21,7 @@ This framework provides automated:
 - **Benchmark Execution**: Benchmarks across different system configurations
 - **Data Extraction**: Performance metrics parsing and analysis  
 - **Visualization**: Statistical comparison and performance plots
-- **System Stability**: Fault-tolerant execution with comprehensive error handling
+- **Resource Monitoring**: Opt-in memory and disk checks (disabled by default)
 
 ## Key Features
 

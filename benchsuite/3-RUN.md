@@ -98,6 +98,14 @@ python3 scripts/analysis/compare_performance.py
 ### NOTE:
 You can run `--help` with any script to see all options.
 
+## Pre-Run Checks
+
+Before each benchmark, `run_all.sh` automatically runs system stability checks via `scripts/utils/system_stability.sh`:
+
+- **Configuration check** : Warns if CPU governor is not set to `performance`
+- **DPF module check** : Warns if DPF kernel module is absent (benchmarks work without it)
+- **Resource monitoring**: Optional (`export MONITOR_RESOURCES=1`), disabled by default
+
 ## Output Files
 
 ### Data

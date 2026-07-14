@@ -73,28 +73,28 @@ int api_core_range(struct dpf_core_range_s *req_data)
 
 	// Check that core_start is non-negative
 	if (req->core_start < 0) {
-		pr_err("%s: Invalid core_start value %d (must be >= 0)\n", 
+		pr_err("%s: Invalid core_start value %d (must be >= 0)\n",
 		       __func__, req->core_start);
 		return -EINVAL;
 	}
 
 	// Check that core_end is within system limits
 	if (req->core_end >= MAX_NUM_CORES) {
-		pr_err("%s: Invalid core_end value %d (must be < %d)\n", 
+		pr_err("%s: Invalid core_end value %d (must be < %d)\n",
 		       __func__, req->core_end, MAX_NUM_CORES);
 		return -EINVAL;
 	}
 
 	// Check that core_start <= core_end
 	if (req->core_start > req->core_end) {
-		pr_err("%s: Invalid core range: start=%d is greater than end=%d\n", 
+		pr_err("%s: Invalid core range: start=%d is greater than end=%d\n",
 		       __func__, req->core_start, req->core_end);
 		return -EINVAL;
 	}
 
 	// Check that the range isn't excessive (optional, adjust as needed)
 	if ((req->core_end - req->core_start + 1) > MAX_NUM_CORES) {
-		pr_err("%s: Core range too large: %d cores requested, max is %d\n", 
+		pr_err("%s: Core range too large: %d cores requested, max is %d\n",
 		       __func__, req->core_end - req->core_start + 1, MAX_NUM_CORES);
 		return -EINVAL;
 	}
@@ -112,7 +112,7 @@ int api_core_range(struct dpf_core_range_s *req_data)
 	sys_first_core = req->core_start;
 	sys_active_cores = (req->core_end + 1) - req->core_start;
 
-	cpumask_clear(&enabled_cpus); 
+	cpumask_clear(&enabled_cpus);
 	pr_info("api_core_range: cleared enabled_cpus mask");
 
 	// Only process cores within the valid range to avoid unnecessary iterations
@@ -209,9 +209,11 @@ int api_tuning(struct dpf_req_tuning_s *req_data)
 		req->aggr = req->aggr < MIN_AGGR ? MIN_AGGR : MAX_AGGR;
 	}
 
-	// Store tuning algorithm and aggressiveness factor
+	// Store tuning algorithm and aggressiveness factor.
+	// Userspace scales aggr by 10 to avoid floats (e.g. 1.0 -> 10).
+	// Divided by 10 here once so MAB sees the intended value at runtime.
 	tune_alg = req->tunealg;
-	aggr = req->aggr;
+	aggr = req->aggr / 10;
 
 	// Set response values
 	resp->confirmed_tunealg = tune_alg;
@@ -225,7 +227,7 @@ int api_tuning(struct dpf_req_tuning_s *req_data)
 		for_each_online_cpu(core_id) {
 			if (corestate[core_id].core_disabled == 0 && core_in_module(core_id) == 0) {
 				msr_load(core_id);
-				pr_info("Loaded MSR for core %d\n", core_id);
+				// pr_info("Loaded MSR for core %d\n", core_id);
 			}
 		}
 		keep_running = true;
@@ -253,7 +255,7 @@ int api_ddrbw_set(struct dpf_ddrbw_set_s *req_data)
 	struct dpf_ddrbw_set_s *req = req_data;
 	struct dpf_resp_ddrbw_set_s *resp;
 
-	pr_info("Received request with value=%u\n", req->set_value);
+	// pr_info("Received request with value=%u\n", req->set_value);
 
 	resp = kmalloc(sizeof(struct dpf_resp_ddrbw_set_s), GFP_KERNEL);
 	if (!resp)
@@ -270,7 +272,7 @@ int api_ddrbw_set(struct dpf_ddrbw_set_s *req_data)
 	proc_buffer = (char *)resp;
 	proc_buffer_size = sizeof(struct dpf_resp_ddrbw_set_s);
 
-	pr_info("DDR bandwidth target set to %u MB/s\n", ddr_bw_target);
+	// pr_info("DDR bandwidth target set to %u MB/s\n", ddr_bw_target);
 
 	return 0;
 }
@@ -282,7 +284,7 @@ int api_msr_read(struct dpf_msr_read_s *req_data)
 	struct dpf_msr_read_s *req = req_data;
 	struct dpf_resp_msr_read_s *resp;
 
-	pr_info("Received request for core %u\n", req->core_id);
+	// pr_info("Received request for core %u\n", req->core_id);
 
 	if (req->core_id >= MAX_NUM_CORES ||
 	    corestate[req->core_id].core_disabled) {
@@ -307,7 +309,8 @@ int api_msr_read(struct dpf_msr_read_s *req_data)
 	proc_buffer = (char *)resp;
 	proc_buffer_size = sizeof(struct dpf_resp_msr_read_s);
 
-	pr_info("MSR values retrieved for core %u\n", req->core_id);
+	// pr_info("MSR values retrieved for core %u\n", req->core_id);
+
 	return 0;
 }
 
@@ -318,7 +321,7 @@ int api_pmu_read(struct dpf_pmu_read_s *req_data)
 	struct dpf_pmu_read_s *req = req_data;
 	struct dpf_resp_pmu_read_s *resp;
 
-	pr_info("Received request for core %u\n", req->core_id);
+	// pr_info("Received request for core %u\n", req->core_id);
 
 	if (req->core_id >= MAX_NUM_CORES || corestate[req->core_id].core_disabled) {
 		pr_err("Invalid or disabled core %u\n", req->core_id);
@@ -478,7 +481,7 @@ int api_pmu_log_control(struct dpf_pmu_log_control_s *req_data)
 
 	// Validate mode (0=reset, 1=append)
 	if (mode > 1) {
-		pr_err("%s: Invalid mode %u, must be 0 (reset) or 1 (append)\n", 
+		pr_err("%s: Invalid mode %u, must be 0 (reset) or 1 (append)\n",
 		       __func__, mode);
 		kfree(resp);
 		return -EINVAL;
@@ -656,7 +659,7 @@ int api_pmu_log_read(struct dpf_pmu_log_read_s *req_data)
 		resp->header.type = DPF_MSG_PMU_LOG_READ;
 		resp->header.payload_size = resp_size;
 		resp->data_size = 0;
-		
+
 		kfree(proc_buffer);
 		proc_buffer = (char *)resp;
 		proc_buffer_size = resp_size;
@@ -679,7 +682,7 @@ int api_pmu_log_read(struct dpf_pmu_log_read_s *req_data)
 	// Allocate response with enough space for data
 	resp = kmalloc(resp_size, GFP_KERNEL);
 	if (!resp) {
-		pr_err("%s: Failed to allocate response buffer of size %zu\n", 
+		pr_err("%s: Failed to allocate response buffer of size %zu\n",
 		       __func__, resp_size);
 		return -ENOMEM;
 	}
@@ -693,12 +696,12 @@ int api_pmu_log_read(struct dpf_pmu_log_read_s *req_data)
 	// Copy data if any
 	if (bytes_to_read > 0) {
 		memcpy(resp->data, pmu_log_buffer, bytes_to_read);
-		pr_info("%s: Copied %llu bytes of PMU data to response (first entry: core=%u, ts=%llu)\n", 
-		       __func__, bytes_to_read, 
+		pr_info("%s: Copied %llu bytes of PMU data to response (first entry: core=%u, ts=%llu)\n",
+		       __func__, bytes_to_read,
 		       ((dpf_pmu_log_entry_t *)resp->data)->core_id,
 		       ((dpf_pmu_log_entry_t *)resp->data)->timestamp);
 	} else {
-		pr_info("%s: No data to copy (bytes_to_read=%llu)\n", 
+		pr_info("%s: No data to copy (bytes_to_read=%llu)\n",
 		       __func__, bytes_to_read);
 	}
 
@@ -707,7 +710,7 @@ int api_pmu_log_read(struct dpf_pmu_log_read_s *req_data)
 	proc_buffer = (char *)resp;
 	proc_buffer_size = resp_size;
 
-	pr_info("%s: Read %llu/%zu bytes from PMU log buffer\n", 
+	pr_info("%s: Read %llu/%zu bytes from PMU log buffer\n",
 	       __func__, bytes_to_read, pmu_log_data_size);
 
 	return 0;

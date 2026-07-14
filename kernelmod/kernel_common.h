@@ -14,17 +14,18 @@
 
 #define DPF_API_VERSION (1)   // API version for user-kernel communication
 
-// PMU counters: 7 total (cycles, instructions, and 5 additional events)
-#define PMU_COUNTERS (7)
+// PMU counters: 8 total (cycles, instructions, and 6 additional events)
+#define PMU_COUNTERS (8)
 
-// MSR definitions: 6 MSRs monitored
-#define NR_OF_MSR (6)
+// MSR definitions: 7 MSRs monitored
+#define NR_OF_MSR (7)
 #define MSR_1320_INDEX (0)  // Index for MSR 0x1320 (e.g., L2_STREAM_AMP_XQ_THRESHOLD)
 #define MSR_1321_INDEX (1)  // Index for MSR 0x1321
 #define MSR_1322_INDEX (2)  // Index for MSR 0x1322
 #define MSR_1323_INDEX (3)  // Index for MSR 0x1323
 #define MSR_1324_INDEX (4)  // Index for MSR 0x1324
-#define MSR_1A4_INDEX (5)   // Index for MSR 0x1A4 (miscellaneous features)
+#define MSR_1327_INDEX (5)  // Index for MSR 0x1327
+#define MSR_1A4_INDEX (6)   // Index for MSR 0x1A4 (miscellaneous features)
 
 // MSR register addresses for PMU configuration
 #define MSR_IA32_PERFEVTSEL0        0x186
@@ -34,12 +35,13 @@
 #define MSR_IA32_PERFEVTSEL4        0x18A
 #define MSR_IA32_PERFEVTSEL5        0x18B
 #define MSR_IA32_PERFEVTSEL6        0x18C
+#define MSR_IA32_PERFEVTSEL7        0x18D
 #define MSR_IA32_PERF_GLOBAL_STATUS 0x38D
 #define MSR_IA32_PERF_GLOBAL_CTRL   0x38F
 
 // MSR masks and controls
 #define MSR_LOW_MASK                0xFFFFFFFF  // Mask for low 32 bits
-#define PMC_ENABLE_ALL              0x7F        // Enable PMC0-6
+#define PMC_ENABLE_ALL              0xFF        // Enable PMC0-7
 
 // PMU log entry structure - shared between kernel and user space
 typedef struct {
@@ -54,7 +56,8 @@ typedef struct {
 #define EVENT_CPU_CLK_UNHALTED_THREAD       (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
 #define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c2ULL) // Event 0x00, UMask 0xc2, Enable
 #define EVENT_MEM_UOPS_RETIRED_ALL_LOADS    (0x00000000004381d0ULL) // Event 0x81, UMask 0xd0, Enable
-#define EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT  (0x00000000004302d1ULL) // Event 0x02, UMask 0xd1, Enable
+#define EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT  (0x0000000000430224ULL) // Event 0x24, UMask 0x02, L2-hit
+#define EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS (0x0000000000430124ULL) // Event 0x24, UMask 0x01, L2-miss
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT  (0x00000000004304d1ULL) // Event 0x04, UMask 0xd1, Enable
 #define EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT (0x00000000004380d1ULL) // Event 0x80, UMask 0xd1, Enable
 #define EVENT_XQ_PROMOTION_ALL              (0x00000000004300f4ULL) // Event 0x00, UMask 0xf4, Enable (custom)
@@ -67,7 +70,8 @@ enum pmu_metrics {
     PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT,    // Index 3: Load uops retired hitting DRAM
     PERF_XQ_PROMOTION_ALL,                  // Index 4: XQ promotion events (hardware-specific)
     PERF_CPU_CLK_UNHALTED_THREAD,           // Index 5: CPU cycles when thread is not halted
-    PERF_INST_RETIRED_ANY_P                 // Index 6: Instructions retired
+    PERF_INST_RETIRED_ANY_P,                // Index 6: Instructions retired
+    PERF_MEM_LOAD_UOPS_RETIRED_L2_MISS      // Index 7: Load uops retired missing in L2 cache
 };
 
 // Constants

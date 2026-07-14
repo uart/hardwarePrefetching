@@ -7,12 +7,29 @@ start_dpf_process() {
     local core_range="$2"
     local dpf_log="$3"
     local baseline_mode="$4"
+    local baseline="${5:-2}"  # Default to baseline=2 if not provided
+    local config_file="$6"
     
     if [[ "$baseline_mode" == false ]]; then
-        sudo "$dpf_binary" --core "$core_range" --intervall 1 --ddrbw-set 46000 -l 5 -t 2 > "$dpf_log" 2>&1 &
+        local dpf_dir="$(dirname "$dpf_binary")"
+        
+        # Use hardcoded DPF arguments with timeout for proper termination
+        echo "Starting DPF with arguments: --core $core_range --intervall 1 --ddrbw-set 46000 -l 5 -t 2" >&2
+        echo "DPF working directory: $dpf_dir" >&2
+        echo "DPF log file: $dpf_log" >&2
+        echo "Baseline mode: $baseline" >&2
+        echo "Config file: $config_file" >&2
+        
+        (cd "$dpf_dir" && sudo "$dpf_binary" --core "$core_range" --intervall 1 --ddrbw-set 46000 -l 5 -t 2 > "$dpf_log" 2>&1) &
         local dpf_pid=$!
+        
+        # Give DPF a moment to initialize
         sleep 1
-        echo "DPF started with PID: $dpf_pid"
+        
+        # Trigger DPF to begin logging
+        sudo kill -SIGUSR1 "$dpf_pid"
+        
+        echo "DPF started with PID: $dpf_pid" >&2
         echo "$dpf_pid"
         return 0
     else

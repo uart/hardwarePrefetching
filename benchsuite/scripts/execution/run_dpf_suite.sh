@@ -3,7 +3,7 @@
 #################################################################################
 # Complete Benchmark DPF Runner
 #
-# This script runs ALL Integer benchmarks with DPF enabled
+# This script runs ALL configured benchmarks with DPF enabled
 # for comprehensive performance comparison against baseline data.
 #
 # Designed for unattended execution - follows exact same structure as baseline runner.
@@ -14,7 +14,7 @@ show_help() {
  DPF Benchmark Suite Runner
 
 DESCRIPTION:
-    Runs ALL  Integer benchmarks with DPF (Dynamic Prefetching Framework)
+    Runs ALL configured benchmarks with DPF (Dynamic Prefetching Framework)
     enabled for comprehensive performance comparison against baseline data.
 
 USAGE:
@@ -88,8 +88,28 @@ BENCHMARK_TESTS=(
 
 # Run mode support - determine which benchmarks to run and iterations
 if [ "$RUN_MODE" = "quick" ]; then
-    [[ "$VERBOSE" == true ]] && echo "QUICK mode: running xalancbmk benchmark only with DPF"
-    BENCHMARK_TESTS=("623.xalancbmk")
+    # Suite-aware quick benchmark selection
+    source "${SCRIPT_DIR}/../../config/spec_command_lines_benchmark.sh" 2>/dev/null || source "${PROJECT_ROOT}/config/spec_command_lines_benchmark.sh"
+    
+    # Determine quick benchmark based on suite type
+    if [[ "$BENCHMARK_SUITE" == "intspeed" || "$BENCHMARK_SUITE" == "intrate" ]]; then
+        # Integer suites: use xalancbmk
+        if [[ "$BENCHMARK_SUITE" == "intspeed" ]]; then
+            quick_benchmark="623.xalancbmk"
+        else
+            quick_benchmark="523.xalancbmk"
+        fi
+    else
+        # Floating point suites: use specrand (fastest synthetic benchmark)
+        if [[ "$BENCHMARK_SUITE" == "fpspeed" ]]; then
+            quick_benchmark="996.specrand"
+        else
+            quick_benchmark="997.specrand"
+        fi
+    fi
+    
+    [[ "$VERBOSE" == true ]] && echo "QUICK mode: running $quick_benchmark benchmark only with DPF"
+    BENCHMARK_TESTS=("$quick_benchmark")
 else
     [[ "$VERBOSE" == true ]] && echo "DPF mode: running all benchmarks with DPF (1 iteration each)"
 fi

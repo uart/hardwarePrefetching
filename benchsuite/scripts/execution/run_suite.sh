@@ -3,7 +3,7 @@
 #################################################################################
 # Complete Baseline Runner
 # 
-# This script runs ALL Integer benchmarks in baseline mode
+# This script runs ALL configured benchmarks in baseline mode
 #        for comprehensive performance baseline data collection.
 #
 #################################################################################
@@ -13,7 +13,7 @@ show_help() {
 Baseline Benchmark Suite Runner
 
 DESCRIPTION:
-    Runs ALL Integer benchmarks in baseline mode
+    Runs ALL configured benchmarks in baseline mode
     for comprehensive performance baseline data collection.
 
 USAGE:
@@ -85,8 +85,28 @@ BENCHMARK_LIST=(
 
 # Run mode support - determine which benchmarks to run and iterations
 if [ "$RUN_MODE" = "quick" ]; then
-    [[ "$VERBOSE" == true ]] && echo "QUICK mode: running xalancbmk benchmark only (1 iteration)"
-    BENCHMARK_LIST=("623.xalancbmk")
+    # Suite-aware quick benchmark selection
+    source "${SCRIPT_DIR}/../../config/spec_command_lines_benchmark.sh" 2>/dev/null || source "${PROJECT_ROOT}/config/spec_command_lines_benchmark.sh"
+    
+    # Determine quick benchmark based on suite type
+    if [[ "$BENCHMARK_SUITE" == "intspeed" || "$BENCHMARK_SUITE" == "intrate" ]]; then
+        # Integer suites: use xalancbmk
+        if [[ "$BENCHMARK_SUITE" == "intspeed" ]]; then
+            quick_benchmark="623.xalancbmk"
+        else
+            quick_benchmark="523.xalancbmk"
+        fi
+    else
+        # Floating point suites: use specrand (fastest synthetic benchmark)
+        if [[ "$BENCHMARK_SUITE" == "fpspeed" ]]; then
+            quick_benchmark="996.specrand"
+        else
+            quick_benchmark="997.specrand"
+        fi
+    fi
+    
+    [[ "$VERBOSE" == true ]] && echo "QUICK mode: running $quick_benchmark benchmark only (1 iteration)"
+    BENCHMARK_LIST=("$quick_benchmark")
 elif [ "$RUN_MODE" = "full" ] || [ "$RUN_MODE" = "dpf" ]; then
     [[ "$VERBOSE" == true ]] && echo "Running all benchmarks with 1 iteration"
 else

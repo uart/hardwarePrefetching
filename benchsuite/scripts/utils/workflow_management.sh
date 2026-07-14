@@ -62,10 +62,6 @@ execute_standard_workflow() {
     fi
 }
 
-# REMOVED: check_existing_baseline function
-# Analysis and baseline checking should be handled separately by compare_performance.py
-# Execution workflows should focus only on running benchmarks successfully
-
 # Determine completion status and return exit code
 determine_completion_status() {
     local run_mode="$1"

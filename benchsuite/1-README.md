@@ -21,7 +21,7 @@ This framework provides automated:
 - **Benchmark Execution**: Benchmarks across different system configurations
 - **Data Extraction**: Performance metrics parsing and analysis  
 - **Visualization**: Statistical comparison and performance plots
-- **System Stability**: Fault-tolerant execution with comprehensive error handling
+- **Resource Monitoring**: Opt-in memory and disk checks (disabled by default)
 
 ## Key Features
 
@@ -40,7 +40,7 @@ This framework provides automated:
 ## Project Structure
 
 ```
-bench_suite/
+benchsuite/
 ├── run_all.sh                # Main execution script
 ├── config/                   # Configuration files
 ├── scripts/                  # Execution and analysis scripts

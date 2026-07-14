@@ -42,10 +42,14 @@
 # Execution flags
 ./run_all.sh --dpf             # Add dpf analysis to any mode
 ./run_all.sh --verbose          # Detailed output
+./run_all.sh --note TEXT       # Annotate run with custom identifier
 
 # Single benchmark
 sudo ./run_all.sh --benchmark 623.xalancbmk  # Run single benchmark (xalancbmk)
 sudo ./run_all.sh --benchmark 602.gcc --iterations 3 # Specify iterations
+
+# Annotated runs for tracking different configurations
+./run_all.sh --quick --note L2Q_val4_XQ_val5    # Quick test with annotation
 
 # Single benchmark examples
 sudo ./run_all.sh --benchmark 623.xalancbmk
@@ -93,6 +97,14 @@ python3 scripts/analysis/compare_performance.py
 
 ### NOTE:
 You can run `--help` with any script to see all options.
+
+## Pre-Run Checks
+
+Before each benchmark, `run_all.sh` automatically runs system stability checks via `scripts/utils/system_stability.sh`:
+
+- **Configuration check** : Warns if CPU governor is not set to `performance`
+- **DPF module check** : Warns if DPF kernel module is absent (benchmarks work without it)
+- **Resource monitoring**: Optional (`export MONITOR_RESOURCES=1`), disabled by default
 
 ## Output Files
 

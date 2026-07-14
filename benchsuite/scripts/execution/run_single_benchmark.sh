@@ -8,6 +8,7 @@ source "scripts/utils/dpf_management.sh" 2>/dev/null || source "./scripts/utils/
 declare -a BENCHMARK_PIDS=()
 DPF_PID=""
 CLEANUP_REQUIRED=false
+ORIGINAL_TURBO_STATE=""  # Store original turbo state for restoration
 
 # Cleanup function to kill all processes
 cleanup() {
@@ -38,6 +39,11 @@ cleanup() {
         fi
         
         echo "Cleanup completed"
+    fi
+    
+    # Restore original turbo state if it was saved
+    if [[ -n "$ORIGINAL_TURBO_STATE" ]]; then
+        restore_turbo_state
     fi
 }
 
@@ -178,7 +184,6 @@ export BENCHSUITE_ROOT SPEC_CPU_DIR RESULTS_DIR LOGS_DIR ANALYSIS_DIR DATA_DIR D
 
 #### 3. Path Validation and Setup ###########################################
 dpf_binary="$DPF_BINARY"
-config_file="$DPF_CONFIG"
 commands_dir="$SPEC_CPU_DIR"
 # Use results directory from config
 results_base_dir="$RESULTS_DIR/reports"
@@ -189,10 +194,6 @@ if [[ "$BASELINE_MODE" == false ]]; then
         echo "ERROR: DPF binary not found at: $DPF_BINARY"
         exit 1
     fi
-    if [[ ! -f "$DPF_CONFIG" ]]; then
-        echo "ERROR: DPF config file not found at: $DPF_CONFIG"
-        exit 1
-    fi
 fi
 
 if [[ ! -d "$SPEC_CPU_DIR" ]]; then
@@ -200,18 +201,31 @@ if [[ ! -d "$SPEC_CPU_DIR" ]]; then
     exit 1
 fi
 
-timestamp=$(date +"%Y%m%d-%H%M%S")
+# Use shared timestamp from parent process if available, otherwise generate new one
+if [[ -n "$SHARED_TIMESTAMP" ]]; then
+    timestamp=$(echo "$SHARED_TIMESTAMP" | tr '_' '-')  # Convert format from run_all.sh
+else
+    timestamp=$(date +"%Y%m%d-%H%M%S")
+fi
+
 # Use proper naming based on actual run mode, not just DPF on/off
 if [[ "$BASELINE_MODE" == true ]]; then
     # Standard mode (DPF disabled) - use mode-specific suffix
     if [[ -n "$RUN_MODE" ]]; then
-        results_dir="${results_base_dir}/${timestamp}_${RUN_MODE}"
+        base_name="${timestamp}_${RUN_MODE}"
     else
-        results_dir="${results_base_dir}/${timestamp}_standard"
+        base_name="${timestamp}_standard"
     fi
 else
     # DPF enabled mode
-    results_dir="${results_base_dir}/${timestamp}_dpf"
+    base_name="${timestamp}_dpf"
+fi
+
+# Add note annotation if provided
+if [[ -n "$NOTE" ]]; then
+    results_dir="${results_base_dir}/${base_name}_${NOTE}"
+else
+    results_dir="${results_base_dir}/${base_name}"
 fi
 if ! mkdir -p "${results_dir}"; then
     echo "ERROR: Failed to create results directory: $results_dir"
@@ -281,23 +295,13 @@ else
 fi
 
 #### 6. Load Configuration Parameters #######################################
-# Source configuration from central file (already loaded above, just map parameters)
 if [[ -f "$config_file_path" ]]; then
     # Configuration already sourced above, just map variables
     
     # Map config file variables to script variables
-    use_all_cores=${USE_ALL_CORES:-1}
-    log_arms=${LOG_ARMS:-1}
-    log_ipc=${LOG_IPC:-1}
-    log_bw=${LOG_BW:-1}
     performance=${PERFORMANCE_MODE:-1}
     turbo=${TURBO_MODE:-0}
     rdpmc=${RDPMC:-1}
-    epsilon=${EPSILON:-0.1}
-    gamma=${GAMMA:-0.959}
-    c=${C:-0.0006}
-    arm_configuration=${ARM_CONFIGURATION:-2}
-    reward=${REWARD:-0}
     
     # Parse core IDs from config
     if [[ -n "$CORE_IDS" ]]; then
@@ -310,45 +314,81 @@ else
     echo "Using default values..."
     
     # Default fallback values
-    use_all_cores=1
-    log_arms=1
-    log_ipc=1
-    log_bw=1
     performance=1
     turbo=0
     rdpmc=1
     core_ids=(6 7 8)
-    epsilon=0.1
-    gamma=0.959
-    c=0.0006
-    arm_configuration=2
-    reward=0
 fi
 
 #### 7. Helper Functions ####################################################
 
-# Simplified config modification for benchmarks
-modify_config() {
-    if [[ "$BASELINE_MODE" == false ]]; then
-        jq --argjson arm_configuration "$arm_configuration" \
-           --argjson epsilon "$epsilon" \
-           --argjson gamma "$gamma" \
-           --argjson c "$c" \
-           --argjson log_arms "$log_arms" \
-           --argjson log_ipc "$log_ipc" \
-           --argjson log_bw "$log_bw" \
-           --argjson use_all_cores "$use_all_cores" \
-           --argjson reward "$reward" \
-           '.arm_configuration = $arm_configuration |
-            .epsilon = $epsilon |
-            .gamma = $gamma |
-            .c = $c |
-            .log_arms = $log_arms |
-            .log_ipc = $log_ipc |
-            .log_bw = $log_bw |
-            .use_all_cores = $use_all_cores |
-            .reward = $reward' \
-           "$config_file" > tmp.json && mv tmp.json "$config_file"
+# DPF execution with graceful handling
+start_dpf() {
+    local dpf_log="$1"
+    local baseline="${2:-2}"  # Default to baseline=2 if not provided
+    local config_file="$3"
+    local dpf_dir="$(dirname "$dpf_binary")"
+    
+    # Use hardcoded DPF arguments with timeout for proper termination
+    echo "Starting DPF with arguments: --core $core_range --intervall 1 --ddrbw-set 46000 -l 5 -t 2" >&2
+    echo "DPF working directory: $dpf_dir" >&2
+    echo "DPF log file: $dpf_log" >&2
+    echo "Baseline mode: $baseline" >&2
+    echo "Config file: $config_file" >&2
+    
+    (cd "$dpf_dir" && sudo "$dpf_binary" --core "$core_range" --intervall 1 --ddrbw-set 46000 -l 5 -t 2 > "$dpf_log" 2>&1) &
+    local dpf_pid=$!
+    
+    # Give DPF a moment to initialize
+    sleep 1
+    
+    # Trigger DPF to begin logging
+    sudo kill -SIGUSR1 "$dpf_pid"
+    
+    echo "$dpf_pid"
+}
+
+#### Turbo State Management Functions #######################################
+
+read_turbo_state() {
+    # Read MSR 0x1a0 (IA32_MISC_ENABLE), check bit 38
+    # Bit 38 = 1: turbo disabled, Bit 38 = 0: turbo enabled
+    sudo modprobe msr 2>/dev/null
+    local msr_value=$(sudo rdmsr -p 0 0x1a0 2>/dev/null)
+    
+    if [[ -z "$msr_value" ]]; then
+        echo "WARNING: Could not read turbo state from MSR" >&2
+        return 1
+    fi
+    
+    # Check bit 38 (0x4000000000 in hex)
+    local bit38=$(( (0x$msr_value >> 38) & 1 ))
+    
+    if [[ $bit38 -eq 1 ]]; then
+        echo "disabled"
+    else
+        echo "enabled"
+    fi
+}
+
+save_and_disable_turbo() {
+    # Save current state
+    ORIGINAL_TURBO_STATE=$(read_turbo_state)
+    echo "Original turbo state: $ORIGINAL_TURBO_STATE"
+    
+    # Always disable turbo for benchmarks
+    sudo modprobe msr 2>/dev/null
+    sudo wrmsr -a 0x1a0 0x4000850089
+    echo "Turbo disabled for benchmark execution"
+}
+
+restore_turbo_state() {
+    if [[ "$ORIGINAL_TURBO_STATE" == "enabled" ]]; then
+        echo "Restoring turbo to enabled state"
+        sudo modprobe msr 2>/dev/null
+        sudo wrmsr -a 0x1a0 0x850089
+    else
+        echo "Turbo was originally disabled, leaving it disabled"
     fi
 }
 
@@ -359,9 +399,11 @@ set_governor_to_performance() {
     fi
 }
 
-disable_turbo_boost() {
-    sudo modprobe msr
-    sudo wrmsr -a 0x1a0 0x4000850089
+set_governor_to_powersave() {
+    if ls /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1; then
+        echo powersave | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null
+        echo "Governor set to: powersave"
+    fi
 }
 
 enable_rdpmc() {
@@ -403,13 +445,19 @@ generate_core_range() {
     fi
 }
 
-#### 8. Benchmark-Specific Setup Functions #################################
-#### 9. Main Execution Logic ################################################
+#### 8. Main Execution Logic ################################################
 core_range=$(generate_core_range) || exit 1
 
+# Save current turbo state and disable it for benchmarks
+save_and_disable_turbo
+
 # Set CPU performance settings
-[ "$performance" -eq 1 ] && set_governor_to_performance
-[ "$turbo" -eq 0 ] && disable_turbo_boost
+if [ "$performance" -eq 1 ]; then
+    set_governor_to_performance
+elif [ "$performance" -eq 0 ]; then
+    set_governor_to_powersave
+fi
+
 [ "$rdpmc" -eq 1 ] && enable_rdpmc
 
 run_benchmark() {
@@ -478,85 +526,6 @@ run_benchmark() {
         # Set binary name for command execution
         binary_name=$(basename "$full_binary_path")
 
-        # Enhanced benchmark input file handling - simplified
-        handle_benchmark_inputs() {
-            [[ "$VERBOSE" == true ]] && echo "Validating input files for benchmark: $benchmark_name..."
-            
-            # Set input directory path
-            input_dir="${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input"
-            
-            # Validate input directory exists
-            if [[ ! -d "$input_dir" ]]; then
-                echo "ERROR: Input directory not found: $input_dir" | tee -a "${dir}/error.log"
-                echo "Please ensure SPEC CPU2017 is properly installed with all benchmark data." | tee -a "${dir}/error.log"
-                return 1
-            fi
-            
-            # Basic input file validation - check that essential files exist in SPEC directory
-            case "$benchmark_name" in
-                "perlbench")
-                    essential_files=("checkspam.pl" "splitmail.pl" "diffmail.pl")
-                    ;;
-                "gcc")
-                    essential_files=("gcc-pp.c" "scilab.c" "t1.c")
-                    ;;
-                "mcf")
-                    essential_files=("inp.in")
-                    ;;
-                "omnetpp")
-                    essential_files=("omnetpp.ini")
-                    ;;
-                "xalancbmk")
-                    essential_files=("allbooks.xml" "xalanc.xsl")
-                    ;;
-                "x264")
-                    essential_files=("BuckBunny.yuv")
-                    ;;
-                "deepsjeng")
-                    essential_files=("ref.txt")
-                    ;;
-                "leela")
-                    essential_files=("ref.sgf")
-                    ;;
-                "exchange2")
-                    essential_files=() # No input files required
-                    ;;
-                "xz")
-                    essential_files=("cpu2006docs.tar.xz")
-                    ;;
-                *)
-                    echo "WARNING: Unknown benchmark: $benchmark_name" | tee -a "${dir}/error.log"
-                    essential_files=()
-                    ;;
-            esac
-            
-            # Check for missing essential files and report clearly
-            missing_files=()
-            for essential_file in "${essential_files[@]}"; do
-                if [[ ! -f "$input_dir/$essential_file" ]]; then
-                    missing_files+=("$essential_file")
-                fi
-            done
-            
-            if [[ ${#missing_files[@]} -gt 0 ]]; then
-                echo "ERROR: Missing essential input files for $benchmark_name:" | tee -a "${dir}/error.log"
-                for missing_file in "${missing_files[@]}"; do
-                    echo "  - $missing_file" | tee -a "${dir}/error.log"
-                done
-                echo "Location: $input_dir" | tee -a "${dir}/error.log"
-                echo "Please ensure SPEC CPU2017 is properly installed with all benchmark data." | tee -a "${dir}/error.log"
-                return 1
-            fi
-            
-            [[ "$VERBOSE" == true ]] && echo " Input files validated successfully"
-            return 0
-        }
-
-        # Validate benchmark input files
-        if ! handle_benchmark_inputs; then
-            echo "ERROR: Input file validation failed" | tee -a "${dir}/error.log"
-            return 1
-        fi
         
         # Run benchmark iterations
         for ((i=0; i<iterations; i++)); do
@@ -584,66 +553,88 @@ run_benchmark() {
             
             # Start DPF only if not in baseline mode
             if [[ "$BASELINE_MODE" == false ]]; then
-                sudo "$dpf_binary" --core "$core_range" --intervall 1 --ddrbw-set 46000 -l 5 -t 2 > "$dpf_log" 2>&1 &
-                DPF_PID=$!
-                sleep 1
+                # Start DPF
+                local baseline_mode=2  # baseline test with logging
+                local config_file="$(dirname "$dpf_binary")/mab_config.json"
+                DPF_PID=$(start_dpf "$dpf_log" "$baseline_mode" "$config_file")
                 echo "DPF started with PID: $DPF_PID"
             else
                 echo "Running in baseline mode - DPF disabled"
                 DPF_PID=""
             fi
                  
-            # Process command to replace absolute input paths with relative ones
+            # Extract command arguments 
             processed_command="${command#* }"  # Remove binary path from command
-            
-            # Smart path processing for SpecInt benchmarks
-            input_dir_pattern="${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input/"
-            # Only replace if the pattern actually exists in the command
-            if [[ "$processed_command" == *"$input_dir_pattern"* ]]; then
-                processed_command="${processed_command//$input_dir_pattern/}"
-            fi
             
             # Run benchmark on all cores
             BENCHMARK_PIDS=()  # Reset global array
             CLEANUP_REQUIRED=true  # Enable cleanup
+            
+            # Extract execution directory from the command - simple approach
+            # Look for input directory pattern in the command
+            input_file_path=$(echo "$command_template" | grep -o '/[^[:space:]]*/input/[^[:space:]]*' | head -1)
+            if [[ -n "$input_file_path" ]]; then
+                execution_input_dir=$(dirname "$input_file_path")
+            else
+                # For benchmarks with no input files (like exchange2), use benchmark root
+                execution_input_dir=$(dirname "$full_binary_path")
+                execution_input_dir=$(dirname "$execution_input_dir")
+            fi
+            
             for core_id in "${core_ids[@]}"; do
                 (
-                    cd "${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input"
+                    cd "$execution_input_dir"
                     echo "Running on core $core_id..."
                     
-                    # Create core-specific command for SpecInt benchmarks
+                    # Create core-specific command for benchmark execution
                     core_command="$processed_command"
                     
-                    # Handle x264 stats file naming (only SpecInt benchmark that needs this)
+                    # Handle x264 stats file naming (only benchmark that needs this)
                     if [[ "$benchmark_name" == "x264" ]]; then
                         core_command="${core_command//x264_stats.log/x264_stats_core${core_id}.log}"
                     fi
                     
                     echo "Command: $full_binary_path ${core_command}"
                     
+                    # Execute with proper working directory
                     taskset -c "$core_id" /usr/bin/time -v \
-                    /bin/bash -lc "$full_binary_path ${core_command}"
+                    /bin/bash -lc "cd '$execution_input_dir' && $full_binary_path ${core_command}"
+                    
+                    # Tell DPF we're done on this core
+                    if [[ "$BASELINE_MODE" == false && -n "$DPF_PID" ]]; then
+                        echo "stop $core_id" | sudo socat - UNIX-SENDTO:/tmp/dpf_socket 2>/dev/null || true
+                    fi
                 ) > "${log_file}.core${core_id}" 2>&1 & 
                 BENCHMARK_PIDS+=($!)
             done
             
             echo "Waiting for benchmark processes to complete..."
-            wait "${BENCHMARK_PIDS[@]}"
+            # Wait for all core-pinned workloads to finish
+            for pid in "${BENCHMARK_PIDS[@]}"; do
+                wait "$pid"
+            done
             
+            # Final sleep to ensure all processes have settled
+            sleep 5
+            
+            # Kill DPF process now that all cores are done 
             if [[ "$BASELINE_MODE" == false && -n "$DPF_PID" ]]; then
                 if kill -0 $DPF_PID 2>/dev/null; then
-                    echo "Stopping DPF process with SIGINT"
-                    sudo kill -SIGINT $DPF_PID 2>/dev/null
+                    echo "Killing DPF process (PID: $DPF_PID)"
+                    sudo kill $DPF_PID 2>/dev/null
+                    # Give DPF time to terminate gracefully
                     sleep 2
-                    # Check if graceful shutdown worked
+                    # Force kill if still running
                     if kill -0 $DPF_PID 2>/dev/null; then
-                        echo "DPF process still running, using SIGTERM"
-                        sudo kill -TERM $DPF_PID 2>/dev/null
+                        echo "DPF still running, forcing termination"
+                        sudo kill -9 $DPF_PID 2>/dev/null
                     fi
-                    wait $DPF_PID 2>/dev/null
                     echo "DPF stopped"
                 fi
             fi
+            
+            # Final sleep to ensure all processes have settled
+            sleep 10
             
             # Clear process arrays after successful completion
             BENCHMARK_PIDS=()
@@ -683,7 +674,7 @@ run_benchmark() {
     echo ""
     echo " Benchmark execution completed"
     echo "Results saved to: $dir"
-    echo "Execution directory: ${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input"
+    echo "Execution directory: $execution_input_dir"
     
     # Comprehensive result validation
     total_logs=$(find "$dir" -name "*.log.core*" | wc -l)
@@ -741,18 +732,18 @@ run_benchmark() {
 }
 
 # Execute benchmark
-echo "Running $SPECINT_BENCHMARK ($([ "$BASELINE_MODE" == true ] && echo "baseline" || echo "DPF"), $iterations iterations)"
+echo "Running $benchmark_name ($([ "$BASELINE_MODE" == true ] && echo "baseline" || echo "DPF"), $iterations iterations)"
 
 # Execute the benchmark and capture the result
 if     run_benchmark; then
-    echo "SUCCESS: $SPECINT_BENCHMARK completed"
+    echo "SUCCESS: $benchmark_name completed"
     if [[ "$VERBOSE" == true ]]; then
         echo "Results: $results_dir"
     fi
     exit 0
 else
     exit_code=$?
-    echo "FAILED: $SPECINT_BENCHMARK (exit code: $exit_code)"
+    echo "FAILED: $benchmark_name (exit code: $exit_code)"
     if [[ "$VERBOSE" == true ]]; then
         echo "Results: $results_dir"
         echo "Check benchmark_error.log for details"

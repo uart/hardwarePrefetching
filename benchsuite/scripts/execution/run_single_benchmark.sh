@@ -571,8 +571,9 @@ run_benchmark() {
             CLEANUP_REQUIRED=true  # Enable cleanup
             
             # Extract execution directory from the command - simple approach
-            # Look for input directory pattern in the command
-            input_file_path=$(echo "$command_template" | grep -o '/[^[:space:]]*/input/[^[:space:]]*' | head -1)
+            # Look for input directory pattern OR run directory pattern in the 
+            # command
+            input_file_path=$(echo "$command_template" | grep -oE '/[^[:space:]]*/input/[^[:space:]]*|/[^[:space:]]*/run/run_base_ref[^[:space:]]*' | head -1)
             if [[ -n "$input_file_path" ]]; then
                 execution_input_dir=$(dirname "$input_file_path")
             else

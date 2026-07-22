@@ -133,6 +133,147 @@ benchmark_commands["548.exchange2"]="${exchange2_r_bin} ${exchange2_r_input}/con
 # 557.xz_r - Data compression
 benchmark_commands["557.xz"]="${xz_r_bin} ${xz_r_input}/cpu2006docs.tar.xz 6643 055ce243071129412e9dd0b3b69a21654033a9b723d874b2015c774fac1553d9713be561ca86f74e4f16f22e664fc17a79f30caa5ad2c04fbc447549c2810fae 1036078272 1111795472 4 > cpu2006docs.out 2>> cpu2006docs.err"
 
-### 7. Export for external use ###
+### 7. Floating Point Speed Benchmark Binaries ###
+
+bwaves_s_bin="${commands_dir}/603.bwaves_s/exe/speed_bwaves_base.mytest-m64"
+cactuBSSN_s_bin="${commands_dir}/607.cactuBSSN_s/exe/cactuBSSN_s_base.mytest-m64"
+lbm_s_bin="${commands_dir}/619.lbm_s/exe/lbm_s_base.mytest-m64"
+wrf_s_bin="${commands_dir}/621.wrf_s/exe/wrf_s_base.mytest-m64"
+cam4_s_bin="${commands_dir}/627.cam4_s/exe/cam4_s_base.mytest-m64"
+pop2_s_bin="${commands_dir}/628.pop2_s/exe/speed_pop2_base.mytest-m64"
+imagick_s_bin="${commands_dir}/638.imagick_s/exe/imagick_s_base.mytest-m64"
+nab_s_bin="${commands_dir}/644.nab_s/exe/nab_s_base.mytest-m64"
+fotonik3d_s_bin="${commands_dir}/649.fotonik3d_s/exe/fotonik3d_s_base.mytest-m64"
+roms_s_bin="${commands_dir}/654.roms_s/exe/sroms_base.mytest-m64"
+specrand_fs_bin="${commands_dir}/996.specrand_fs/exe/specrand_fs_base.mytest-m64"
+
+### 8. Floating Point Rate Benchmark Binaries ###
+
+bwaves_r_bin="${commands_dir}/503.bwaves_r/exe/bwaves_r_base.mytest-m64"
+cactuBSSN_r_bin="${commands_dir}/507.cactuBSSN_r/exe/cactusBSSN_r_base.mytest-m64"
+namd_r_bin="${commands_dir}/508.namd_r/exe/namd_r_base.mytest-m64"
+parest_r_bin="${commands_dir}/510.parest_r/exe/parest_r_base.mytest-m64"
+povray_r_bin="${commands_dir}/511.povray_r/exe/povray_r_base.mytest-m64"
+lbm_r_bin="${commands_dir}/519.lbm_r/exe/lbm_r_base.mytest-m64"
+wrf_r_bin="${commands_dir}/521.wrf_r/exe/wrf_r_base.mytest-m64"
+blender_r_bin="${commands_dir}/526.blender_r/exe/blender_r_base.mytest-m64"
+cam4_r_bin="${commands_dir}/527.cam4_r/exe/cam4_r_base.mytest-m64"
+imagick_r_bin="${commands_dir}/538.imagick_r/exe/imagick_r_base.mytest-m64"
+nab_r_bin="${commands_dir}/544.nab_r/exe/nab_r_base.mytest-m64"
+fotonik3d_r_bin="${commands_dir}/549.fotonik3d_r/exe/fotonik3d_r_base.mytest-m64"
+roms_r_bin="${commands_dir}/554.roms_r/exe/roms_r_base.mytest-m64"
+specrand_fr_bin="${commands_dir}/997.specrand_fr/exe/specrand_fr_base.mytest-m64"
+
+### 9. Floating Point Input Directories ###
+
+# Speed input directories
+bwaves_s_input="${commands_dir}/603.bwaves_s/run/run_base_refspeed_mytest-m64.0000"
+cactuBSSN_s_input="${commands_dir}/607.cactuBSSN_s/run/run_base_refspeed_mytest-m64.0000"
+lbm_s_input="${commands_dir}/619.lbm_s/run/run_base_refspeed_mytest-m64.0000"
+wrf_s_input="${commands_dir}/621.wrf_s/run/run_base_refspeed_mytest-m64.0000"
+cam4_s_input="${commands_dir}/627.cam4_s/run/run_base_refspeed_mytest-m64.0000"
+pop2_s_input="${commands_dir}/628.pop2_s/run/run_base_refspeed_mytest-m64.0000"
+imagick_s_input="${commands_dir}/638.imagick_s/run/run_base_refspeed_mytest-m64.0000"
+nab_s_input="${commands_dir}/544.nab_r/data/refspeed/input"
+fotonik3d_s_input="${commands_dir}/649.fotonik3d_s/run/run_base_refspeed_mytest-m64.0000"
+roms_s_input="${commands_dir}/654.roms_s/run/run_base_refspeed_mytest-m64.0000"
+specrand_fs_input="${commands_dir}/999.specrand_ir/data/refrate/input"
+
+# Rate input directories
+bwaves_r_input="${commands_dir}/503.bwaves_r/run/run_base_refrate_mytest-m64.0023"
+cactuBSSN_r_input="${commands_dir}/507.cactuBSSN_r/run/run_base_refrate_mytest-m64.0023"
+namd_r_input="${commands_dir}/508.namd_r/run/run_base_refrate_mytest-m64.0023"
+parest_r_input="${commands_dir}/510.parest_r/run/run_base_refrate_mytest-m64.0023"
+povray_r_input="${commands_dir}/511.povray_r/run/run_base_refrate_mytest-m64.0000"
+lbm_r_input="${commands_dir}/519.lbm_r/run/run_base_refrate_mytest-m64.0023"
+wrf_r_input="${commands_dir}/521.wrf_r/run/run_base_refrate_mytest-m64.0023"
+blender_r_input="${commands_dir}/526.blender_r/run/run_base_refrate_mytest-m64.0023"
+cam4_r_input="${commands_dir}/527.cam4_r/run/run_base_refrate_mytest-m64.0023"
+imagick_r_input="${commands_dir}/538.imagick_r/run/run_base_refrate_mytest-m64.0023"
+nab_r_input="${commands_dir}/544.nab_r/data/refrate/input"
+fotonik3d_r_input="${commands_dir}/549.fotonik3d_r/run/run_base_refrate_mytest-m64.0023"
+roms_r_input="${commands_dir}/554.roms_r/run/run_base_refrate_mytest-m64.0000"
+specrand_fr_input="${commands_dir}/999.specrand_ir/data/refrate/input"
+
+### 10. Floating Point Speed Benchmark Commands ###
+
+# 603.bwaves_s
+benchmark_commands["603.bwaves"]="${bwaves_s_bin} ${bwaves_s_input}/bwaves_1 < ${bwaves_s_input}/bwaves_1.in > bwaves_1.out 2>> bwaves_1.err"
+
+# 607.cactuBSSN_s
+benchmark_commands["607.cactuBSSN"]="${cactuBSSN_s_bin} ${cactuBSSN_s_input}/spec_ref.par > spec_ref.out 2>> spec_ref.err"
+
+# 619.lbm_s
+benchmark_commands["619.lbm"]="${lbm_s_bin} 3000 reference.dat 0 0 ${lbm_s_input}/200_200_260_ldc.of > lbm.out 2>> lbm.err"
+
+# 621.wrf_s : uses run dir via input path
+benchmark_commands["621.wrf"]="${wrf_s_bin} ${wrf_s_input}/namelist.input > rsl.out.0000 2>> wrf.err"
+
+# 627.cam4_s : uses run dir via input path
+benchmark_commands["627.cam4"]="${cam4_s_bin} ${cam4_s_input}/atm_in > cam4.txt 2>> cam4.err"
+
+# 628.pop2_s : uses run dir via input path
+benchmark_commands["628.pop2"]="${pop2_s_bin} ${pop2_s_input}/atm_modelio.nml > pop2.out 2>> pop2.err"
+
+# 638.imagick_s
+benchmark_commands["638.imagick"]="${imagick_s_bin} -limit disk 0 ${imagick_s_input}/refspeed_input.tga -resize 817% -rotate -2.76 -shave 540x375 -alpha remove -auto-level -contrast-stretch 1x1% -colorspace Lab -channel R -equalize +channel -colorspace sRGB -define histogram:unique-colors=false -adaptive-blur 0x5 -despeckle -auto-gamma -adaptive-sharpen 55 -enhance -brightness-contrast 10x10 -resize 30% refspeed_output.tga > refspeed_convert.out 2>> refspeed_convert.err"
+
+# 644.nab_s
+benchmark_commands["644.nab"]="${nab_s_bin} 3j1n 20140317 220 > ${nab_s_input}/3j1n.out 2>> ${nab_s_input}/3j1n.err"
+
+# 649.fotonik3d_s : uses run dir via input path
+benchmark_commands["649.fotonik3d"]="${fotonik3d_s_bin} ${fotonik3d_s_input}/OBJ.dat > fotonik3d.log 2>> fotonik3d.err"
+
+# 654.roms_s
+benchmark_commands["654.roms"]="${roms_s_bin} < ${roms_s_input}/ocean_benchmark3.in.x > ocean_benchmark3.log 2>> ocean_benchmark3.err"
+
+# 996.specrand_fs
+benchmark_commands["996.specrand"]="${specrand_fs_bin} 1255432124 234923 > ${specrand_fs_input}/rand.234923.out 2>> ${specrand_fs_input}/rand.234923.err"
+
+### 11. Floating Point Rate Benchmark Commands ###
+
+# 503.bwaves_r
+benchmark_commands["503.bwaves"]="${bwaves_r_bin} ${bwaves_r_input}/bwaves_3 < ${bwaves_r_input}/bwaves_3.in > bwaves_3.out 2>> bwaves_3.err"
+
+# 507.cactuBSSN_r
+benchmark_commands["507.cactuBSSN"]="${cactuBSSN_r_bin} ${cactuBSSN_r_input}/spec_ref.par > spec_ref.out 2>> spec_ref.err"
+
+# 508.namd_r
+benchmark_commands["508.namd"]="${namd_r_bin} --input ${namd_r_input}/apoa1.input --output apoa1.ref.output --iterations 65 > namd.out 2>> namd.err"
+
+# 510.parest_r
+benchmark_commands["510.parest"]="${parest_r_bin} ${parest_r_input}/ref.prm > ref.out 2>> ref.err"
+
+# 511.povray_r
+benchmark_commands["511.povray"]="${povray_r_bin} ${povray_r_input}/SPEC-benchmark-ref.ini > SPEC-benchmark-ref.stdout 2>> SPEC-benchmark-ref.stderr"
+
+# 519.lbm_r
+benchmark_commands["519.lbm"]="${lbm_r_bin} 3000 reference.dat 0 0 ${lbm_r_input}/100_100_130_ldc.of > lbm.out 2>> lbm.err"
+
+# 521.wrf_r : uses run dir via input path
+benchmark_commands["521.wrf"]="${wrf_r_bin} ${wrf_r_input}/namelist.input > rsl.out.0000 2>> wrf.err"
+
+# 526.blender_r
+benchmark_commands["526.blender"]="${blender_r_bin} ${blender_r_input}/sh3_no_char.blend --render-output sh3_no_char_ --threads 1 -b -F RAWTGA -s 849 -e 849 -a > sh3_no_char.849.spec.out 2>> sh3_no_char.849.spec.err"
+
+# 527.cam4_r : uses run dir via input path
+benchmark_commands["527.cam4"]="${cam4_r_bin} ${cam4_r_input}/atm_in > cam4.txt 2>> cam4.err"
+
+# 538.imagick_r
+benchmark_commands["538.imagick"]="${imagick_r_bin} -limit disk 0 ${imagick_r_input}/refrate_input.tga -edge 41 -resample 181% -emboss 31 -colorspace YUV -mean-shift 19x19+15% -resize 30% refrate_output.tga > refrate_convert.out 2>> refrate_convert.err"
+
+# 544.nab_r
+benchmark_commands["544.nab"]="${nab_r_bin} 1am0 1122214447 122 > ${nab_r_input}/1am0.out 2>> ${nab_r_input}/1am0.err"
+
+# 549.fotonik3d_r : uses run dir via input path
+benchmark_commands["549.fotonik3d"]="${fotonik3d_r_bin} ${fotonik3d_r_input}/OBJ.dat > fotonik3d.log 2>> fotonik3d.err"
+
+# 554.roms_r
+benchmark_commands["554.roms"]="${roms_r_bin} < ${roms_r_input}/ocean_benchmark2.in.x > ocean_benchmark2.log 2>> ocean_benchmark2.err"
+
+# 997.specrand_fr
+benchmark_commands["997.specrand"]="${specrand_fr_bin} 1255432124 234923 > ${specrand_fr_input}/rand.234923.out 2>> ${specrand_fr_input}/rand.234923.err"
+
+### 12. Export for external use ###
 export commands_dir
 export -A benchmark_commands

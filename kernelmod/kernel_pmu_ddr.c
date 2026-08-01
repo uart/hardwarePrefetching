@@ -95,7 +95,7 @@ static uint64_t kernel_pmu_ddr_client(struct ddr_s *ddr, int type)
 			ddr->rd_last_update[i] = readq(addr);
 
 			uint64_t diff = ddr->rd_last_update[i] - oldvalue_rd;
-		
+
 			total += diff;
 		}
 	} else if (type == DDR_PMU_WR) {
@@ -172,15 +172,6 @@ int kernel_pmu_ddr_init_grr_srf(struct ddr_s *ddr, uint64_t ddr_bar)
 		uint64_t reg_base =
 		    ddr_bar + GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ;
 
-		if (!request_mem_region(reg_base, GRR_SRF_DDR_RANGE,
-					"dpf_ddr_server")) {
-			pr_err("Cannot reserve region 0x%llx (size=0x%x)\n",
-			       reg_base, GRR_SRF_DDR_RANGE);
-			/* Unused for now, but keeping region request for debugging purposes */
-			__request_region(&iomem_resource, reg_base,
-					 GRR_SRF_DDR_RANGE, NULL, 0);
-		}
-
 		mapping[i] = ioremap(reg_base, GRR_SRF_DDR_RANGE);
 		if (!mapping[i]) {
 			pr_err("Failed to map controller %d at 0x%llx\n",
@@ -229,15 +220,6 @@ int kernel_pmu_ddr_init_client(struct ddr_s *ddr, uint64_t ddr_bar)
 
 	for (i = 0; i < num_ddr_controllers; i++) {
 		uint64_t reg_base = ddr_bar + offsets[i];
-
-		if (!request_mem_region(reg_base, CLIENT_DDR_RANGE,
-					"dpf_ddr_client")) {
-			pr_err("Cannot reserve region 0x%llx (size=0x%x)\n",
-			       reg_base, CLIENT_DDR_RANGE);
-			/* Unused for now, but keeping region request for debugging purposes */
-			__request_region(&iomem_resource, reg_base,
-					 CLIENT_DDR_RANGE, NULL, 0);
-		}
 
 		mapping[i] = ioremap(reg_base, CLIENT_DDR_RANGE);
 		if (!mapping[i]) {

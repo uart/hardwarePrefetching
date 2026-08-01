@@ -585,11 +585,16 @@ int main(int argc, char *argv[])
 			rdt_enabled = 1;
 		} else {
 			loge(TAG, "Neither DDR nor RDT support was found\n");
-			return -1;
+			return -1;	
 		}
 	}
 
 	if (kernel_mode == 1) {
+		// Auto-detect mode is not allowed in kernel mode
+		if (ddr_bw_target == DDR_BW_AUTOTEST) {
+			loge(TAG, "Auto-detect mode is not allowed in kernel mode \n");
+			return -1;
+		}
 
 		if (kernel_mode_init() < 0)
 			return -1;

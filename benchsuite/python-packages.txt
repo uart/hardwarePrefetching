@@ -1,0 +1,17 @@
+# Python packages for benchmark Performance Analysis
+# Install with: pip3 install -r python-packages.txt
+
+# Essential packages (always required)
+pandas>=1.3.0
+matplotlib>=3.3.0
+numpy>=1.20.0
+
+# Enhanced analysis (recommended)
+scipy>=1.7.0
+seaborn>=0.11.0
+
+# Utility packages
+tabulate>=0.8.0
+
+# Compatibility (for older Python versions)
+pathlib2>=2.3.0; python_version < "3.4"

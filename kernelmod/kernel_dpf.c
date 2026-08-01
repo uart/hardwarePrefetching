@@ -6,6 +6,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/ioport.h>
+#include <linux/workqueue.h>
 
 #include "kernel_common.h"
 #include <linux/kernel.h>
@@ -23,6 +24,7 @@
 #include "kernel_pmu_ddr.h"
 #include "kernel_primitive.h"
 #include "kernel_api.h"
+#include "kernel_mab.h"
 
 #define TIMER_INTERVAL_SEC 1
 #define PROC_FILE_NAME "dynamicPrefetch"
@@ -37,10 +39,29 @@ __u64 ddr_bar_address;
 static DEFINE_MUTEX(dpf_mutex);
 cpumask_t enabled_cpus;
 
+// Workqueue for deferring SMP calls from timer to task context
+static struct work_struct monitor_work;
+
 
 // Global tuning algorithm settings, these should be set through the dpf_tuning_control API.
 int tune_alg;
 int aggr;
+
+// Apply the full boot-default hardware prefetcher configuration.
+static void set_boot_default_on_core(void *info)
+{
+	(void)info;
+
+	native_write_msr(0x1A4, 0x00000004U, 0x00000000U);
+	native_write_msr(0x1320, 0x070906C4U, 0x10883FEAU);
+	native_write_msr(0x1321, 0x34140001U, 0x00002511U);
+	native_write_msr(0x1322, 0x4CD0046CU, 0x2807FFFFU);
+	native_write_msr(0x1323, 0xC0000000U, 0x0001F9C0U);
+	native_write_msr(0x1324, 0x00000000U, 0x06000000U);
+	native_write_msr(0x1325, 0x0005C138U, 0x09220620U);
+	native_write_msr(0x1326, 0x00000000U, 0x3F000000U);
+	native_write_msr(0x1327, 0x05920014U, 0x00000000U);
+}
 
 // Configures PMU for a core, sets up performance counters
 // core_id: The CPU core to configure
@@ -69,11 +90,14 @@ static void configure_pmu_on_core(void *info)
 	native_write_msr(MSR_IA32_PERFEVTSEL6,
 		EVENT_INST_RETIRED_ANY_P & MSR_LOW_MASK,
 		EVENT_INST_RETIRED_ANY_P >> 32);
+	native_write_msr(MSR_IA32_PERFEVTSEL7,
+		EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS & MSR_LOW_MASK,
+		EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS >> 32);
 
 	// Reset the performance counter control register first
 	native_write_msr(MSR_IA32_PERF_GLOBAL_STATUS, 0, 0); // Clear performance counters status
 
-	// Enable PMC0-6
+	// Enable PMC0-7
 	native_write_msr(MSR_IA32_PERF_GLOBAL_CTRL, PMC_ENABLE_ALL, 0);
 }
 
@@ -107,26 +131,26 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 {
 	size_t bytes_to_copy;
 
-	pr_info("%s: Enter: count=%zu, pos=%lld, proc_buffer_size=%zu\n",
-	       __func__, count, *pos, proc_buffer_size);
+	// pr_info("%s: Enter: count=%zu, pos=%lld, proc_buffer_size=%zu\n",
+	//        __func__, count, *pos, proc_buffer_size);
 
 	// Check if we have data to read
 	if (!proc_buffer || proc_buffer_size == 0) {
-		pr_info("%s: No data available to read\n", __func__);
+		// pr_info("%s: No data available to read\n", __func__);
 		return 0;
 	}
 
 	// Check if we've already read everything
 	if (*pos >= proc_buffer_size) {
-		pr_info("%s: Reached end of data\n", __func__);
+		// pr_info("%s: Reached end of data\n", __func__);
 		return 0;
 	}
 
 	// Calculate how much we can copy
 	bytes_to_copy = min(count, proc_buffer_size - *pos);
 
-	pr_info("%s: Attempting to copy %zu bytes from offset %lld\n",
-	       __func__, bytes_to_copy, *pos);
+	// pr_info("%s: Attempting to copy %zu bytes from offset %lld\n",
+	//         __func__, bytes_to_copy, *pos);
 
 	// Copy data to user space
 	if (copy_to_user(buffer, proc_buffer + *pos, bytes_to_copy)) {
@@ -137,8 +161,8 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 
 	// Update position
 	*pos += bytes_to_copy;
-	pr_info("%s: Successfully copied %zu bytes (new pos: %lld)\n",
-	       __func__, bytes_to_copy, *pos);
+	// pr_info("%s: Successfully copied %zu bytes (new pos: %lld)\n",
+	//         __func__, bytes_to_copy, *pos);
 
 	return bytes_to_copy;
 }
@@ -258,12 +282,12 @@ static void per_core_work(void *info)
 			memcpy(log_entry.pmu_values, corestate[core_id].pmu_raw, sizeof(log_entry.pmu_values));
 
 			// Debug: Print first few PMU values
-			pr_info("Core %d: PMU values[0]=%llu, [1]=%llu, [2]=%llu, [3]=%llu\n",
-			       core_id,
-			       log_entry.pmu_values[0],
-			       log_entry.pmu_values[1],
-			       log_entry.pmu_values[2],
-			       log_entry.pmu_values[3]);
+			// pr_info("Core %d: PMU values[0]=%llu, [1]=%llu, [2]=%llu, [3]=%llu\n",
+			//        core_id,
+			//        log_entry.pmu_values[0],
+			//        log_entry.pmu_values[1],
+			//        log_entry.pmu_values[2],
+			//        log_entry.pmu_values[3]);
 
 			// Append to log buffer
 			int ret = api_pmu_log_append_data(&log_entry, sizeof(log_entry));
@@ -272,38 +296,133 @@ static void per_core_work(void *info)
 			}
 		}
 
-		if (core_id == first_core()) {
-			if((tune_alg == 0) || (tune_alg == 1))kernel_basicalg(tune_alg, aggr);
-			//else if ()  //Multi-Armed Bandit (MAB) goes here
-			else pr_err("First Core ready but tune alg %d has not been defined\n", tune_alg);
+		// if (core_id == first_core()) {
+		// 	if((tune_alg == 0) || (tune_alg == 1))kernel_basicalg
+		// (tune_alg, aggr);
+		// 	//else if ()  //Multi-Armed Bandit (MAB) goes here
+		// 	else pr_err("First Core ready but tune alg %d has not
+		//	been defined\n", tune_alg);
 
+		// }
+
+		// MAB: dispatch init or main algorithm for this core.
+
+		int active = mab_core_is_active(core_id);
+		int module_leader = -1;
+
+		if (active < 0) { // first call
+
+			// first call or error, treat as active but skip tuning
+			// to seed the timestamp.
+			// pr_debug("MAB core %d: first tick, skipping\n",
+			// core_id);
+
+		} else if (active == 0) { // core is idle
+
+			mab_cores[core_id].idle_counter++;
+
+			// pr_debug("MAB core %d idle cnt=%d mod_cnt=%d\n",
+			// 	 core_id, mab_cores[core_id].idle_counter,
+			// 	 mab_modules[module_id(core_id)].idle_counter);
+
+			// Module idle tracking: owned by the first
+			// non-disabled core in the module.
+			// Using mab_first_enabled_core
+			if (core_id == mab_first_enabled_core(module_id
+				(core_id))) {
+
+					mab_modules[module_id(core_id)]
+						.idle_counter++;
+
+				if (mab_modules[module_id(core_id)].
+					idle_counter > IDLE_THRESHOLD) {
+					mab_modules[module_id(core_id)].
+					initialized = MAB_INIT_NOT_STARTED;
+					// pr_debug("MAB mod %d idle threshold
+					// hit, resetting init state\n",
+					// module_id(core_id));
+				}
+			}
+
+			// pr_debug("MAB core %d idle (counter=%d)\n", core_id,
+			//	mab_cores[core_id].idle_counter);
+
+
+		} else if (active == 1) {	// core is active
+
+			mab_cores[core_id].idle_counter = 0;
+			module_leader = mab_first_active_core(module_id
+				(core_id));
+
+			// pr_debug("MAB core %d elected leader=%d for mod
+			// %d\n",
+			//	core_id, module_leader, module_id(core_id));
+			mab_modules[module_id(core_id)].idle_counter = 0;
+
+			// pr_info("MAB core %d active, idle reset,
+			// leader=%d\n", core_id, module_leader);
+
+			if (mab_modules[module_id(core_id)]
+			.initialized == MAB_INIT_DONE) {
+
+				int ret = mab_tuning(core_id);
+
+				if (ret < 0)
+					pr_err("MAB tuning failed for core "
+						"%d\n", core_id);
+
+			} else if (core_id == module_leader) {
+
+				// Only the first active core in the module
+				// drives initialization.
+				int ret = mab_init_module_step(core_id);
+
+				if (ret < 0)
+					pr_err("MAB module init failed for core"
+						"%d\n", core_id);
+			}
 		}
 
-		if (core_in_module(core_id) == 0 && is_msr_dirty(core_id) == 1) {
-			pr_debug("Core %d update MSR\n", core_id);
-
+		if (core_id == module_leader && is_msr_dirty(core_id) == 1) {
+			// pr_debug("Core %d update MSR\n", core_id);
 			msr_update(core_id);
 		}
 	}
 }
 
-// Optimized monitor callback using precomputed cpumask
+// Workqueue function that executes per-core work in task context
+// This runs in a kworker thread, satisfying in_task() requirement
+static void monitor_work_func(struct work_struct *work)
+{
+	// Verify we're in task context (diagnostic)
+	if (in_interrupt()) {
+		pr_err("BUG: monitor_work_func running in interrupt context!\n");
+		return;
+	}
+
+	if (!keep_running)
+		return;
+
+	if (!cpumask_empty(&enabled_cpus)) {
+		// Execute work on local CPU first
+		per_core_work(NULL);
+
+		// Now safe to call smp_call_function_many from task context
+		// wait=true ensures synchronization before returning
+		smp_call_function_many(&enabled_cpus, per_core_work,
+					NULL, true);
+	}
+}
+
+// Lightweight timer callback - only schedules work, no SMP calls
 static enum hrtimer_restart monitor_callback(struct hrtimer *timer)
 {
 	if (!keep_running)
 		return HRTIMER_NORESTART;
 
-	if (!cpumask_empty(&enabled_cpus)) {
-
-		//first call for myself, then all other cores
-		per_core_work(NULL);
-
-		preempt_disable(); //required by smp_call_function_*()
-		//pr_info("Enabling smp_call_function_many\n");
-		smp_call_function_many(&enabled_cpus, per_core_work,
-					NULL, false);
-		preempt_enable();
-	}
+	// Schedule work to run in task context
+	// schedule_work() is safe from IRQ context and prevents duplicate queuing
+	schedule_work(&monitor_work);
 
 	hrtimer_forward_now(timer, kt_period);
 	return HRTIMER_RESTART;
@@ -314,11 +433,15 @@ static int __init dpf_module_init(void)
 {
 	struct proc_dir_entry *entry;
 	int core_id;
+	int module_idx;
 
 	pr_info("dPF Module Loaded\n");
 
 	for (core_id = 0; core_id < MAX_NUM_CORES; core_id++)
 		corestate[core_id].core_disabled = 1;
+
+	on_each_cpu(set_boot_default_on_core, NULL, 1);
+	on_each_cpu(configure_pmu_on_core, NULL, 1);
 
 	proc_buffer = kmalloc(PROC_BUFFER_SIZE, GFP_KERNEL);
 	if (!proc_buffer)
@@ -330,6 +453,19 @@ static int __init dpf_module_init(void)
 		kfree(proc_buffer);
 		return -ENOMEM;
 	}
+	// Initialize workqueue for deferred SMP calls
+	INIT_WORK(&monitor_work, monitor_work_func);
+
+	// Load default arm MSR configs before any core starts.
+	mab_setup_default_arms();
+
+	// Mark all cores as not started so per_core_work triggers initialization on first tick.
+	for (core_id = 0; core_id < MAX_NUM_CORES; core_id++)
+		mab_cores[core_id].initialized = MAB_INIT_NOT_STARTED;
+
+	// Mark all modules as not started.
+	for (module_idx = 0; module_idx < MAX_MODULES; module_idx++)
+		mab_modules[module_idx].initialized = MAB_INIT_NOT_STARTED;
 
 	kt_period = ktime_set(TIMER_INTERVAL_SEC, 0);
 	hrtimer_init(&monitor_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -339,45 +475,41 @@ static int __init dpf_module_init(void)
 }
 
 // Module cleanup
-static void __exit dpf_module_exit(void)
-{
-    pr_info("Stopping dPF monitor thread\n");
+static void __exit dpf_module_exit(void) {
+	pr_info("Stopping dPF monitor thread\n");
 
-    // Stop timer and prevent further work
-    keep_running = false;
-    hrtimer_cancel(&monitor_timer);
+	// Stop timer and prevent further work
+	keep_running = false;
+	hrtimer_cancel(&monitor_timer);
+	// Wait for any pending work to complete before cleanup
+	cancel_work_sync(&monitor_work);
 
-    // Remove /proc entry and free resources
-    remove_proc_entry(PROC_FILE_NAME, NULL);
-    kfree(proc_buffer);
+	// Remove /proc entry and free resources
+	remove_proc_entry(PROC_FILE_NAME, NULL);
+	kfree(proc_buffer);
 
-    // Cleanup PMU logging resources
-    if (pmu_log_buffer) {
-        pr_info("Cleaning up PMU logging resources\n");
-        kfree(pmu_log_buffer);
-        pmu_log_buffer = NULL;
-        pmu_log_buffer_size = 0;
-        pmu_log_data_size = 0;
-        pmu_logging_active = false;
-    }
+	// Cleanup PMU logging resources
+	if (pmu_log_buffer) {
+		pr_info("Cleaning up PMU logging resources\n");
+		kfree(pmu_log_buffer);
+		pmu_log_buffer = NULL;
+		pmu_log_buffer_size = 0;
+		pmu_log_data_size = 0;
+		pmu_logging_active = false;
+	}
 
-    // Cleanup DDR mappings
-    for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
-        if (ddr.mmap[i]) {
-            pr_info("Unmapping DDR memory for controller %d\n", i);
-            iounmap((void __iomem *)ddr.mmap[i]);
-            release_mem_region(ddr_bar_address + 
-                               (ddr_cpu_type == DDR_CLIENT ? 
-                                (i == 0 ? CLIENT_DDR0_OFFSET : CLIENT_DDR1_OFFSET) : 
-                                GRR_SRF_MC_ADDRESS(i) + GRR_SRF_FREE_RUN_CNTR_READ),
-                               ddr_cpu_type == DDR_CLIENT ? CLIENT_DDR_RANGE : GRR_SRF_DDR_RANGE);
-            ddr.mmap[i] = NULL;
-        }
-    }
+	// Cleanup DDR mappings
+	for (int i = 0; i < MAX_NUM_DDR_CONTROLLERS; i++) {
+		if (ddr.mmap[i]) {
+			pr_info("Unmapping DDR memory for controller %d\n", i);
+			iounmap((void __iomem *)ddr.mmap[i]);
 
-    pr_info("dPF Module Unloaded\n");
+			ddr.mmap[i] = NULL;
+		}
+	}
+
+	pr_info("dPF Module Unloaded\n");
 }
-
 
 module_init(dpf_module_init);
 module_exit(dpf_module_exit);

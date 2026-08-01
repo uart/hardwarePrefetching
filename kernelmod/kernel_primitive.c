@@ -13,6 +13,13 @@ static int l3_hitr[MAX_NUM_CORES];
 static int good_pf[MAX_NUM_CORES];
 static int core_contr_to_ddr[MAX_NUM_CORES];
 static uint64_t pmu_delta[MAX_NUM_CORES][PMU_COUNTERS]; //changes since last PMU readout
+static int first_core_idx;
+static int last_core_idx;
+
+// store per-core decision for tunealg1
+static int core_benefits[MAX_NUM_CORES];
+static int module_mode[(MAX_NUM_CORES + CORES_PER_COMPUTE_MODULE - 1) /
+	CORES_PER_COMPUTE_MODULE];
 
 //Only tunealg 1 is supported at this time
 int kernel_basicalg(int tunealg, int aggr)
@@ -32,10 +39,6 @@ int kernel_basicalg(int tunealg, int aggr)
 	ddr_rd_bw = kernel_pmu_ddr(&ddr, DDR_PMU_RD) >> 20;
 	ddr_wr_bw = kernel_pmu_ddr(&ddr, DDR_PMU_WR) >> 20;
 
-	pr_info("DDR RD BW: %llu MB/s\n", ddr_rd_bw);
-	pr_info("DDR WR BW: %llu MB/s\n", ddr_wr_bw);
-	pr_info("DDR BW target: %u MB/s\n", ddr_bw_target);
-
 	if (ddr_rd_bw == (uint64_t)-EINVAL || ddr_wr_bw == (uint64_t)-EINVAL) {
 		//Ensure we don't continue next time and get div zero
 		//FIX: Proper handling is to halt all tuning
@@ -48,6 +51,15 @@ int kernel_basicalg(int tunealg, int aggr)
 	if (time_old == 0) {
 		//no selection the first time since all counters will be odd
 		time_old = ktime_get_ns();
+		first_core_idx = first_core();
+		last_core_idx = first_core_idx + active_cores();
+
+		// Initialize module_mode to -1 to ensure the first time we 
+		// always update MSRs based on the benefiting cores, regardless 
+		// of the initial state of the MSRs.
+		for (int i = 0; i < (MAX_NUM_CORES / CORES_PER_COMPUTE_MODULE); 
+		i++)
+			module_mode[i] = MODE_UNINITIALIZED;
 
 		//first time, do some initialization
 
@@ -77,29 +89,19 @@ int kernel_basicalg(int tunealg, int aggr)
 	}
 
 	int ddr_bw_percent = ((ddr_rd_bw + ddr_wr_bw) * time_delta_ms) / (ddr_bw_target_ppms); //percent per ms
-	pr_info("DDR BW percent: %u\n", ddr_bw_percent);
 
 	//
 	//Process PMU data
 	//
-	for (int i = 0; i < active_cores(); i++) {
+	for (int i = first_core_idx; i < last_core_idx; i++) {
 		for (int j = 0; j < PMU_COUNTERS ; j++) {
 			pmu_delta[i][j] = corestate[i].pmu_raw[j] - corestate[i].pmu_old[j];
 		}
-
-		pr_debug("core %u PMUs: LD %llu  L2hit %llu  L3hit %llu\n  DDRhit %llu  XQprom %llu  clk %llu  ret %llu", i,
-			pmu_delta[i][PERF_MEM_UOPS_RETIRED_ALL_LOADS],
-			pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT],
-			pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT],
-			pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT],
-			pmu_delta[i][PERF_XQ_PROMOTION_ALL],
-			pmu_delta[i][PERF_CPU_CLK_UNHALTED_THREAD],
-			pmu_delta[i][PERF_INST_RETIRED_ANY_P]);
 	}
 
 	uint64_t total_ddr_hit = 0;
 
-	for (int i = 0; i < active_cores(); i++) {
+	for (int i = first_core_idx; i < last_core_idx; i++) {
 		total_ddr_hit += pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT];
 	}
 
@@ -109,9 +111,7 @@ int kernel_basicalg(int tunealg, int aggr)
 		return -1;
 	}
 
-	pr_info("delta for total_ddr_hit %llu or %llu MB/s\n", total_ddr_hit, (total_ddr_hit*64) >> 20);
-
-	for (int i = 0; i < active_cores(); i++) {
+	for (int i = first_core_idx; i < last_core_idx; i++) {
 		//check for divide by zero
 		if((pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] == 0) |
 			(pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] == 0) |
@@ -144,10 +144,6 @@ int kernel_basicalg(int tunealg, int aggr)
 			(pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] +
 			pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] +
 			pmu_delta[i][PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT]);
-
-		pr_info("core %2d PMU delta LD: %13lld  HIT(L2: %3d  L3: %3d) DDRpressure: %3d  GOODPF: %3d\n", i,
-			pmu_delta[i][0], l2_hitr[i], l3_hitr[i], core_contr_to_ddr[i], good_pf[i]);
-
 	}
 
 	//
@@ -199,14 +195,93 @@ int kernel_basicalg(int tunealg, int aggr)
 			if (old_l2xq != l2xq) {
 				msr_set_l2xq(i, l2xq);
 				msr_set_dirty(i);
-				if (i == 0)
-					pr_info("Core0 l2xq %d\n", l2xq);
 			}
 
 		}
 
 
-	} //if (tunealg)...
+	} else if (tunealg == 1) {
+		// For each core decide one mode using a single guard chain:
+		// MODE_IDLE(0), MODE_AGGRESSIVE(+1), MODE_BOOT_DEFAULT(-1)
+
+		for (int i = first_core_idx; i < last_core_idx; i++) {
+			uint64_t l2_hit  = pmu_delta[i]
+			[PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT];
+			uint64_t l2_miss = pmu_delta[i]
+			[PERF_MEM_LOAD_UOPS_RETIRED_L2_MISS];
+			uint64_t core_cycles = pmu_delta[i]
+			[PERF_CPU_CLK_UNHALTED_THREAD];
+			uint64_t cycles_per_ms = core_cycles / time_delta_ms;
+
+			if (cycles_per_ms < IDLE_CYCLES_THRESHOLD) {
+				core_benefits[i] = MODE_IDLE;
+			} else if (l2_hit > l2_miss) {
+
+				// benefitting
+				core_benefits[i] = MODE_AGGRESSIVE;
+			} else {
+
+				// non-benefitting
+				core_benefits[i] = MODE_BOOT_DEFAULT;
+			}
+		}
+
+		// Decisions are made per compute module (4 cores/module).
+		for (int module_start = first_core_idx;
+			module_start < last_core_idx;
+			module_start += CORES_PER_COMPUTE_MODULE) {
+			int module_end = module_start +
+			CORES_PER_COMPUTE_MODULE;
+			int module_vote_sum = 0;
+			int module_idx;
+			int desired_mode;
+
+			// handle case where total cores is not a multiple of 4
+			if (module_end > last_core_idx)
+				module_end = last_core_idx;
+
+			// MODE_AGGRESSIVE=+1, MODE_BOOT_DEFAULT=-1, MODE_IDLE=0
+			for (int i = module_start; i < module_end; i++) {
+				module_vote_sum += core_benefits[i];
+			}
+
+			module_idx = (module_start - first_core_idx) /
+				CORES_PER_COMPUTE_MODULE;
+
+			if (module_vote_sum >= BENEFITING_CORES) {
+				desired_mode = MODE_AGGRESSIVE;
+			} else {
+				desired_mode = MODE_BOOT_DEFAULT;
+			}
+
+			if (module_mode[module_idx] == desired_mode)
+				continue;
+
+			if (desired_mode == MODE_AGGRESSIVE) {
+				corestate[module_start].pf_msr[MSR_1320_INDEX]
+					.v = 0x008837ea070906c0ULL;
+				corestate[module_start].pf_msr[MSR_1321_INDEX]
+					.v = 0x0000251134040001ULL;
+				corestate[module_start].pf_msr[MSR_1322_INDEX]
+					.v = 0x280020820cd0046cULL;
+				corestate[module_start].pf_msr[MSR_1327_INDEX]
+					.v = 0x0000000001920014ULL;
+			} else {
+				corestate[module_start].pf_msr[MSR_1320_INDEX]
+					.v = 0x10883fea070906c4ULL;
+				corestate[module_start].pf_msr[MSR_1321_INDEX]
+					.v = 0x0000251134140001ULL;
+				corestate[module_start].pf_msr[MSR_1322_INDEX]
+					.v = 0x2807ffff4cd0046cULL;
+				corestate[module_start].pf_msr[MSR_1327_INDEX]
+					.v = 0x0000000005920014ULL;
+			}
+
+			msr_set_dirty(module_start);
+			module_mode[module_idx] = desired_mode;
+		}
+
+	}
 
 	return 0;
 }

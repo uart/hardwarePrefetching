@@ -5,8 +5,8 @@
 
 
 // Forward declarations and constants needed for the API structures
-#define PMU_COUNTERS (7)
-#define NR_OF_MSR (6)
+#define PMU_COUNTERS (8)
+#define NR_OF_MSR (7)
 
 #define DPF_API_VERSION (1)   // API version for user-kernel communication
 

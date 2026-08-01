@@ -20,9 +20,8 @@ int pmu_update(int core_id)
 	if (core_id < 0 || core_id >= MAX_NUM_CORES || corestate[core_id].core_disabled)
 		return -EINVAL;
 
-	for(int i = 0; i < PMU_COUNTERS; i++) {
+	for (int i = 0; i < PMU_COUNTERS; i++)
 		corestate[core_id].pmu_old[i] = corestate[core_id].pmu_raw[i];
-	}
 
 	// Update PMU counters using the defined indices from kernel_common.h
 	corestate[core_id].pmu_raw[PERF_MEM_UOPS_RETIRED_ALL_LOADS] = native_read_pmc(0);
@@ -32,6 +31,7 @@ int pmu_update(int core_id)
 	corestate[core_id].pmu_raw[PERF_XQ_PROMOTION_ALL] = native_read_pmc(4);
 	corestate[core_id].pmu_raw[PERF_CPU_CLK_UNHALTED_THREAD] = native_read_pmc(5);
 	corestate[core_id].pmu_raw[PERF_INST_RETIRED_ANY_P] = native_read_pmc(6);
+	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_L2_MISS] = native_read_pmc(7);
 
 	return 0;
 }
@@ -60,6 +60,7 @@ int msr_load(int core_id)
 	corestate[core_id].pf_msr[MSR_1322_INDEX].v = __rdmsr(0x1322);
 	corestate[core_id].pf_msr[MSR_1323_INDEX].v = __rdmsr(0x1323);
 	corestate[core_id].pf_msr[MSR_1324_INDEX].v = __rdmsr(0x1324);
+	corestate[core_id].pf_msr[MSR_1327_INDEX].v = __rdmsr(0x1327);
 	corestate[core_id].pf_msr[MSR_1A4_INDEX].v = __rdmsr(0x1a4);
 
 	return 0;
@@ -69,13 +70,14 @@ int msr_load(int core_id)
 // IMPORTANT: This has to be the core with core_id that calls this function or incorrect state will be updated
 int msr_update(int core_id)
 {
-	corestate[core_id].pf_msr_dirty = 1; //reset msr state
+	corestate[core_id].pf_msr_dirty = 0; //reset msr state
 
 	__wrmsr(0x1320, (u32)corestate[core_id].pf_msr[MSR_1320_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1320_INDEX].v >> 32));
 	__wrmsr(0x1321, (u32)corestate[core_id].pf_msr[MSR_1321_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1321_INDEX].v >> 32));
 	__wrmsr(0x1322, (u32)corestate[core_id].pf_msr[MSR_1322_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1322_INDEX].v >> 32));
 	__wrmsr(0x1323, (u32)corestate[core_id].pf_msr[MSR_1323_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1323_INDEX].v >> 32));
 	__wrmsr(0x1324, (u32)corestate[core_id].pf_msr[MSR_1324_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1324_INDEX].v >> 32));
+	__wrmsr(0x1327, (u32)corestate[core_id].pf_msr[MSR_1327_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1327_INDEX].v >> 32));
 	__wrmsr(0x1a4, (u32)corestate[core_id].pf_msr[MSR_1A4_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1A4_INDEX].v >> 32));
 
 	return 0;

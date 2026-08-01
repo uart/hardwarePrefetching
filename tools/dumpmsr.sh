@@ -1,3 +1,7 @@
+echo "MSR 0x1A4"
+OUTPUT="$(sudo rdmsr 0x1a4)"
+./msr2settings a 0x1a4 "${OUTPUT}"
+
 echo "MSR 0x1320"
 OUTPUT="$(sudo rdmsr 0x1320)"
 ./msr2settings a 0x1320 "${OUTPUT}"
@@ -16,6 +20,18 @@ OUTPUT="$(sudo rdmsr 0x1323)"
 
 echo "\nMSR 0x1324"
 OUTPUT="$(sudo rdmsr 0x1324)"
+./msr2settings a 0x1324 "${OUTPUT}"
+
+echo "\nMSR 0x1325"
+OUTPUT="$(sudo rdmsr 0x1325)"
+./msr2settings a 0x1324 "${OUTPUT}"
+
+echo "\nMSR 0x1326"
+OUTPUT="$(sudo rdmsr 0x1326)"
+./msr2settings a 0x1324 "${OUTPUT}"
+
+echo "\nMSR 0x1327"
+OUTPUT="$(sudo rdmsr 0x1327)"
 ./msr2settings a 0x1324 "${OUTPUT}"
 
 
